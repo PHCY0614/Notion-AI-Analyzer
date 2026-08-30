@@ -2,6 +2,7 @@
 
 importScripts("shared.js", "prompt.js", "notion.js", "gemini.js");
 
+// ==== Constants and defaults ====
 const S = globalThis.AnalyzerShared;
 const P = globalThis.AnalyzerPrompt;
 const N = globalThis.AnalyzerNotion;
@@ -110,12 +111,14 @@ class AppError extends Error {
   }
 }
 
+// ==== Runtime module state ====
 let initializePromise = null;
 let stateCache = null;
 let activeAbortController = null;
 let processingPromise = null;
 let preparedDataSourceId = "";
 
+// ==== Configuration normalization ====
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -234,6 +237,7 @@ function normalizeTopicReview(review) {
   };
 }
 
+// ==== State initialization and persistence ====
 async function initialize() {
   if (initializePromise) return initializePromise;
   initializePromise = (async () => {
@@ -333,6 +337,7 @@ async function persistState() {
   await chrome.storage.local.set({ [STATE_KEY]: stateCache });
 }
 
+// ==== Secret management ====
 async function readSecret(key) {
   const sessionValue = (await chrome.storage.session.get(key))[key];
   if (sessionValue) return sessionValue;
@@ -389,6 +394,7 @@ async function requireOpenRouterKey() {
   return key;
 }
 
+// ==== AI provider routing ====
 function normalizeAiProvider(value) {
   return ["vertex", "openrouter"].includes(value) ? value : "gemini";
 }
@@ -431,6 +437,7 @@ async function activeAiContext(config) {
   };
 }
 
+// ==== HTTP helpers ====
 function errorMessage(data, fallback) {
   return data?.message || data?.error?.message || fallback;
 }
@@ -474,6 +481,7 @@ function abortableSleep(milliseconds, signal) {
   });
 }
 
+// ==== Notion transport ====
 async function notionRequest(path, options = {}) {
   const token = options.token || await requireNotionToken();
   const method = options.method || "GET";
@@ -524,6 +532,7 @@ async function notionRequest(path, options = {}) {
   throw new AppError("Notion API 重試次數已用完", { code: "NOTION_RETRY_EXHAUSTED" });
 }
 
+// ==== AI transport ====
 async function googleGenerativeRequest(model, payload, options, descriptor) {
   const apiKey = options.apiKey || await descriptor.requireKey();
   const safeModel = S.normalizeModelName(model);
@@ -728,6 +737,7 @@ async function aiRequest(provider, model, payload, options = {}) {
   return geminiRequest(model, payload, options);
 }
 
+// ==== Processing stage updates ====
 async function setStage(name, detail = {}) {
   if (!stateCache) return;
   stateCache.stage = {
@@ -738,6 +748,7 @@ async function setStage(name, detail = {}) {
   await persistState();
 }
 
+// ==== Timeout and cancellation utilities ====
 async function timedAiRequest(provider, model, payload, options = {}) {
   const minutes = Number(options.timeoutMinutes);
   const timeoutMs = Number.isFinite(minutes) && minutes > 0 ? minutes * 60 * 1000 : 0;
@@ -799,6 +810,7 @@ function notionWriteWithTimeout(path, options, parentSignal) {
   );
 }
 
+// ==== AI model discovery and connection diagnostics ====
 async function listOpenRouterModels(apiKey = "") {
   const key = apiKey || await requireOpenRouterKey();
   let response;
@@ -932,6 +944,7 @@ async function listGeminiModels(apiKey = "") {
   return G.usableModels({ models });
 }
 
+// ==== Notion schema and scanning ====
 async function resolveDataSource(config, token) {
   const rawId = S.extractNotionId(config.notionTarget || config.dataSourceId);
   if (!rawId) {
@@ -1094,6 +1107,7 @@ async function queryTopicOrganizerPages(dataSourceId, token, options = {}) {
   return pages;
 }
 
+// ==== Topic organizer preparation ====
 function topicDictionaryLookup(config = {}, allowedTargets = null) {
   const lookup = new Map();
   const allowed = allowedTargets == null
@@ -1406,6 +1420,7 @@ async function prepareTopicOrganizer() {
   }
 }
 
+// ==== Topic organizer session and drafts ====
 function topicOrganizerForUi() {
   const organizer = stateCache.topicOrganizer;
   if (!organizer) {
@@ -1493,6 +1508,7 @@ async function skipTopicOrganizerGroup(groupId, groupsInput = []) {
   return topicOrganizerForUi();
 }
 
+// ==== Topic organizer application ====
 function mergeDictionaryEntries(existing, additions) {
   const map = new Map(normalizeTopicDictionary(existing).map(item => [N.topicKey(item.name), item]));
   for (const addition of normalizeTopicDictionary(additions)) {
@@ -1840,6 +1856,7 @@ async function resolveOrganizerUnclassified(candidateName, action, replacementTo
   return topicOrganizerForUi();
 }
 
+// ==== Topic organizer rollback ====
 async function rollbackTopicOrganizer() {
   if (stateCache.running) throw new AppError("請先停止目前的主題套用", { code: "BUSY" });
   const snapshot = stateCache.topicRollback;
@@ -1893,6 +1910,7 @@ async function rollbackTopicOrganizer() {
   return topicOrganizerForUi();
 }
 
+// ==== Topic dictionary import and export ====
 function dictionaryExport(config) {
   return {
     format: "notion-ai-analyzer-topic-dictionary",
@@ -1933,6 +1951,7 @@ function previewDictionaryImport(value, config) {
   };
 }
 
+// ==== Pending-page scanning ====
 async function scanPending() {
   if (stateCache.mode === "batch" && !stateCache.paused
     && Boolean(stateCache.running || stateCache.current || stateCache.queue.length)) {
@@ -2019,6 +2038,7 @@ async function scanPending() {
   return pages;
 }
 
+// ==== Analysis pipeline ====
 async function readPageRecords(pageId, token, signal) {
   const records = [];
   let blockCount = 0;
@@ -2237,6 +2257,7 @@ async function analyzeArticle(articleText, config, signal) {
   );
 }
 
+// ==== Queue state and UI-facing responses ====
 function uniqueItems(items) {
   const seen = new Set();
   return (items ?? []).filter(item => {
@@ -2310,6 +2331,7 @@ function publicStatus() {
   };
 }
 
+// ==== Queue processing ====
 function scheduleProcessing(delay = 200) {
   chrome.alarms.create(PROCESS_ALARM, { when: Date.now() + Math.max(50, delay) });
   setTimeout(() => { void processOne(); }, Math.max(25, Math.min(delay, 500)));
@@ -2548,6 +2570,7 @@ async function processOne() {
   return processingPromise;
 }
 
+// ==== Settings persistence ====
 function resolveNotionTarget(settings, current) {
   const notionTarget = String(settings.notionTarget ?? current.notionTarget).trim();
   if (notionTarget && !S.extractNotionId(notionTarget)) {
@@ -2747,6 +2770,7 @@ async function saveSettings(settings) {
   });
 }
 
+// ==== Settings UI and connection diagnostics ====
 async function getConfigForUi() {
   const config = await readConfig();
   const [notionToken, geminiKey, vertexKey, openRouterKey] = await Promise.all([
@@ -2825,6 +2849,7 @@ async function testConnections() {
   };
 }
 
+// ==== Topic-review helpers ====
 function ensureNoTopicReview() {
   if (stateCache.topicReview) {
     throw new AppError("目前有一篇文章等待確認新主題，請先完成確認", {
@@ -2843,6 +2868,7 @@ function uniqueTopicNames(values) {
   });
 }
 
+// ==== Single-page topic review resolution ====
 async function resolveTopicReview(action, replacementTopic = "", customTopic = "", rememberMapping = true) {
   if (stateCache.running) throw new AppError("目前仍在處理文章，請稍後再試", { code: "BUSY" });
   const review = normalizeTopicReview(stateCache.topicReview);
@@ -2973,6 +2999,7 @@ async function resolveTopicReview(action, replacementTopic = "", customTopic = "
   return publicStatus();
 }
 
+// ==== Queue commands ====
 async function queueAll() {
   ensureNoTopicReview();
   const config = await readConfig();
@@ -3060,6 +3087,7 @@ async function retryFailed() {
   return publicStatus();
 }
 
+// ==== Current-page inspection and review ====
 function compactNotionId(value) {
   return String(value ?? "").replace(/-/g, "").toLocaleLowerCase("en-US");
 }
@@ -3175,6 +3203,7 @@ async function reanalyzePage(pageId, force = false) {
   return publicStatus();
 }
 
+// ==== Message routing and Chrome event listeners ====
 async function handleMessage(message) {
   await initialize();
   switch (message?.type) {
