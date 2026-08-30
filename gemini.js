@@ -116,6 +116,13 @@
     return null;
   }
 
+  /**
+   * Builds the Gemini-native systemInstruction, user contents, and
+   * generationConfig shape. Attaches responseMimeType application/json,
+   * responseJsonSchema, maxOutputTokens, and model-specific thinkingConfig.
+   * Does not send HTTP. Organizer compatibility and organizer repair build
+   * their payloads separately so they can omit responseJsonSchema.
+   */
   function generationPayload(systemInstruction, userText, schema, options = {}) {
     const thinkingConfig = thinkingConfigForModel(options.model);
     const generationConfig = {
@@ -136,6 +143,12 @@
     };
   }
 
+  /**
+   * First analysis call. Attaches the analysis JSON schema (ai_title, ai_topics,
+   * ai_keywords, ai_summary). ai_topics here are provisional labels for
+   * AI 暫定主題, not confirmed AI 主題. Builds a provider payload only; does
+   * not send HTTP or write Notion.
+   */
   function buildAnalysisRequest(userPrompt, model = DEFAULT_MODEL, options = {}) {
     return generationPayload(prompt.buildSystemPrompt(options.customPrompt, options.outputSpec), userPrompt, analysisJsonSchema(options.outputSpec), {
       maxOutputTokens: 8192,
@@ -143,6 +156,12 @@
     });
   }
 
+  /**
+   * One-shot analysis repair payload after parse/validate failure. Same schema
+   * as buildAnalysisRequest, lower maxOutputTokens, user text from
+   * buildRepairPrompt. Does not decide whether repair is allowed; callers skip
+   * this when candidateText marks the first response nonRetryable or empty.
+   */
   function buildRepairRequest(invalidOutput, errors, model = DEFAULT_MODEL, options = {}) {
     return generationPayload(
       prompt.buildSystemPrompt(options.customPrompt, options.outputSpec),
@@ -152,6 +171,10 @@
     );
   }
 
+  /**
+   * First long-article chunk-note call. Schema is details/terms/transitions
+   * notes, not a full analysis object and not Notion topics.
+   */
   function buildChunkRequest(chunkText, index, total, model = DEFAULT_MODEL) {
     return generationPayload(
       prompt.CHUNK_SYSTEM_PROMPT,
@@ -161,6 +184,10 @@
     );
   }
 
+  /**
+   * One-shot chunk-note repair payload. Same CHUNK_JSON_SCHEMA as the first
+   * chunk request. extractChunkNote sends at most one of these.
+   */
   function buildChunkRepairRequest(invalidOutput, errors, model = DEFAULT_MODEL) {
     return generationPayload(
       prompt.CHUNK_SYSTEM_PROMPT,
@@ -170,6 +197,12 @@
     );
   }
 
+  /**
+   * First topic-organizer call. Strict JSON schema for groups and
+   * unclassified_topics. Groups map AI 暫定主題 source names onto a standard
+   * topic; that standard may later become confirmed AI 主題 only after the
+   * organizer apply path writes Notion.
+   */
   function buildTopicOrganizerRequest(candidates, existingStandards = [], model = DEFAULT_MODEL, options = {}) {
     if (typeof existingStandards === "string") {
       model = existingStandards;
@@ -183,6 +216,13 @@
     );
   }
 
+  /**
+   * Schema-free organizer JSON payload (same prompt and JSON mime type, no
+   * responseJsonSchema). The caller decides whether to use this fallback
+   * through canRetryTopicOrganizerWithoutSchema(); this builder does not
+   * define those triggers. Used before repair, not instead of
+   * validateTopicOrganizer.
+   */
   function buildTopicOrganizerCompatibilityRequest(candidates, existingStandards = [], model = DEFAULT_MODEL, options = {}) {
     if (typeof existingStandards === "string") {
       model = existingStandards;
@@ -205,6 +245,11 @@
     };
   }
 
+  /**
+   * Organizer repair payload after a parsed response fails validation or JSON
+   * parse. JSON mime without responseJsonSchema. A second invalid result is
+   * not repaired again; the caller locally treats every candidate as unclassified.
+   */
   function buildTopicOrganizerRepairRequest(
     invalidOutput,
     errors,
@@ -240,6 +285,12 @@
     };
   }
 
+  /**
+   * Maps alternate organizer JSON shapes (camelCase, Chinese keys, a groups
+   * array, or a decisions list) into { groups, unclassified_topics }. Does not
+   * validate names, uniqueness, or 2–6-character rules; validateTopicOrganizer
+   * does that after this.
+   */
   function normalizeTopicOrganizerShape(value) {
     let source = value;
     if (Array.isArray(source)) {
@@ -306,6 +357,18 @@
     };
   }
 
+  /**
+   * Accepts an organizer model object after normalizeTopicOrganizerShape.
+   * ok is false only when groups or unclassified_topics are missing arrays.
+   * Unknown non-batch source names are ignored with warnings. Duplicate
+   * sources are ignored; a source already accepted by a valid group remains
+   * assigned there. Invalid-name, missing-reason, and single-source-new
+   * groups send their valid batch candidates back to unclassified. Any
+   * otherwise unused valid batch candidates become unclassified. These
+   * conditions normally degrade safely instead of returning ok:false.
+   * New standard_topic values must pass isOrganizerTopicLabel unless they
+   * already match existingStandards. Does not write confirmed AI 主題.
+   */
   function validateTopicOrganizer(value, candidateNames = [], existingStandards = []) {
     value = normalizeTopicOrganizerShape(value);
     const errors = [];
@@ -407,6 +470,12 @@
     return { ok: true, errors, warnings, value: { groups, unclassified_topics: unclassified } };
   }
 
+  /**
+   * Extracts the first candidate's non-thought text. Safety/block finish
+   * reasons throw with nonRetryable so callers must not send a repair
+   * request. Empty output without a retryable finish reason is also
+   * nonRetryable. Does not parse JSON.
+   */
   function candidateText(response) {
     const parts = response?.candidates?.[0]?.content?.parts ?? [];
     const text = parts
@@ -434,6 +503,12 @@
     throw error;
   }
 
+  /**
+   * Turns a provider response into JSON. Strips a wrapping markdown fence,
+   * then parses; if that fails, parses the substring from the first { to the
+   * last }. Throws with rawOutput on invalid JSON. Does not run
+   * validateAnalysis / validateChunkNotes / validateTopicOrganizer.
+   */
   function parseJsonCandidate(response) {
     const raw = candidateText(response);
     const withoutFence = raw
@@ -458,6 +533,11 @@
     }
   }
 
+  /**
+   * Diagnostic snapshot for a failed or successful attempt: finish/block
+   * reason, truncated raw text (RAW_LOG_LIMIT), safetyRatings, usageMetadata.
+   * Does not throw; candidateText failures become empty rawOutput.
+   */
   function responseDiagnostic(response, raw = "") {
     const candidate = response?.candidates?.[0] ?? {};
     let output = raw;
@@ -500,6 +580,11 @@
     return map;
   }
 
+  /**
+   * Length rule for analysis-time AI 暫定主題 (JSON ai_topics): at most 5
+   * visible characters, no newline or ｜. No 2-character minimum. Confirmed
+   * AI 主題 names are not checked here.
+   */
   function isAtomicTopicLabel(value) {
     const name = shared.cleanText(value);
     return Boolean(name)
@@ -507,6 +592,12 @@
       && !/[\r\n|｜]/u.test(name);
   }
 
+  /**
+   * Always enforces 2–6 visible characters and no newline or ｜. Does not
+   * exempt existing Notion AI 主題 names; validateTopicOrganizer separately
+   * bypasses this check when the standard matches an existing topic.
+   * Background approve/custom guards call this strict function directly.
+   */
   function isOrganizerTopicLabel(value) {
     const name = shared.cleanText(value);
     const length = shared.visibleLength(name);
@@ -539,6 +630,15 @@
       && [...compact.toLocaleLowerCase("zh-Hant-TW")].every(letter => excludedInitials.has(letter));
   }
 
+  /**
+   * Validates article-analysis JSON. Treats ai_topics as AI 暫定主題, not
+   * confirmed AI 主題: each name must be an atomic label (≤5 visible chars).
+   * Known existingTopics are canonicalized by topicKey; if
+   * allowTopicProposals is false, names outside that list fail. Also checks
+   * exact keys, title/summary length, keyword count, and excluded-person
+   * keywords. Returns { ok, errors, value }; value is null when ok is false.
+   * Does not call the provider or write Notion.
+   */
   function validateAnalysis(
     value,
     existingTopics = [],
@@ -622,6 +722,13 @@
     };
   }
 
+  /**
+   * Validates one chunk-note object (details, terms, transitions). Extra keys
+   * fail; missing/non-string arrays fail; empty items are dropped. Item-count
+   * and per-item length caps match CHUNK_JSON_SCHEMA. Not a full analysis
+   * and not Notion topic fields. Same { ok, errors, value } shape as
+   * validateAnalysis.
+   */
   function validateChunkNotes(value) {
     const errors = [];
     if (!value || typeof value !== "object" || Array.isArray(value)) {
