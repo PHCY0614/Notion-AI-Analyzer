@@ -520,16 +520,16 @@ async function notionRequest(path, options = {}) {
   throw new AppError("Notion API 重試次數已用完", { code: "NOTION_RETRY_EXHAUSTED" });
 }
 
-async function geminiRequest(model, payload, options = {}) {
-  const apiKey = options.apiKey || await requireGeminiKey();
+async function googleGenerativeRequest(model, payload, options, descriptor) {
+  const apiKey = options.apiKey || await descriptor.requireKey();
   const safeModel = S.normalizeModelName(model);
-  if (!safeModel) throw new AppError("Gemini 模型名稱格式不正確", { code: "MODEL_INVALID" });
+  if (!safeModel) throw new AppError(descriptor.modelInvalidMessage, { code: "MODEL_INVALID" });
   let attempt = 0;
   while (attempt < 3) {
     let response;
     try {
       response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(safeModel)}:generateContent`,
+        descriptor.buildUrl(safeModel),
         {
           method: "POST",
           headers: {
@@ -543,7 +543,7 @@ async function geminiRequest(model, payload, options = {}) {
     } catch (error) {
       if (error?.name === "AbortError") throw error;
       if (attempt >= 2) {
-        throw new AppError("無法連線到 Gemini API，請檢查網路後再試", { code: "GEMINI_NETWORK" });
+        throw new AppError(descriptor.networkMessage, { code: `${descriptor.codePrefix}_NETWORK` });
       }
       await abortableSleep(Math.min(2 ** attempt, 4) * 1000, options.signal);
       attempt += 1;
@@ -559,71 +559,48 @@ async function geminiRequest(model, payload, options = {}) {
       continue;
     }
 
-    let code = "GEMINI_API";
-    if (response.status === 429) code = "GEMINI_RATE_LIMIT";
+    let code = `${descriptor.codePrefix}_API`;
+    if (response.status === 429) code = `${descriptor.codePrefix}_RATE_LIMIT`;
     else if ([400, 401, 403].includes(response.status)
-      && /key|credential|permission|api/i.test(errorMessage(data, ""))) code = "GEMINI_AUTH";
+      && descriptor.authPattern.test(errorMessage(data, ""))) code = `${descriptor.codePrefix}_AUTH`;
     else if (response.status === 404) code = "MODEL_NOT_FOUND";
-    throw new AppError(errorMessage(data, `Gemini API 錯誤 ${response.status}`), {
+    throw new AppError(errorMessage(data, `${descriptor.apiErrorPrefix} ${response.status}`), {
       code,
       retryAfter: Number(response.headers.get("retry-after")) || 0,
       status: response.status
     });
   }
-  throw new AppError("Gemini API 重試次數已用完", { code: "GEMINI_RETRY_EXHAUSTED" });
+  throw new AppError(descriptor.retryExhaustedMessage, { code: `${descriptor.codePrefix}_RETRY_EXHAUSTED` });
+}
+
+async function geminiRequest(model, payload, options = {}) {
+  return googleGenerativeRequest(model, payload, options, {
+    requireKey: requireGeminiKey,
+    buildUrl(safeModel) {
+      return `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(safeModel)}:generateContent`;
+    },
+    codePrefix: "GEMINI",
+    networkMessage: "無法連線到 Gemini API，請檢查網路後再試",
+    modelInvalidMessage: "Gemini 模型名稱格式不正確",
+    retryExhaustedMessage: "Gemini API 重試次數已用完",
+    apiErrorPrefix: "Gemini API 錯誤",
+    authPattern: /key|credential|permission|api/i
+  });
 }
 
 async function vertexRequest(model, payload, options = {}) {
-  const apiKey = options.apiKey || await requireVertexKey();
-  const safeModel = S.normalizeModelName(model);
-  if (!safeModel) throw new AppError("Vertex AI 模型名稱格式不正確", { code: "MODEL_INVALID" });
-  let attempt = 0;
-  while (attempt < 3) {
-    let response;
-    try {
-      response = await fetch(
-        `https://aiplatform.googleapis.com/v1/publishers/google/models/${encodeURIComponent(safeModel)}:generateContent`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-goog-api-key": apiKey
-          },
-          body: JSON.stringify(payload),
-          signal: options.signal
-        }
-      );
-    } catch (error) {
-      if (error?.name === "AbortError") throw error;
-      if (attempt >= 2) {
-        throw new AppError("無法連線到 Vertex AI，請檢查網路後再試", { code: "VERTEX_NETWORK" });
-      }
-      await abortableSleep(Math.min(2 ** attempt, 4) * 1000, options.signal);
-      attempt += 1;
-      continue;
-    }
-
-    const data = await readJsonResponse(response);
-    if (response.ok) return data;
-
-    if ([500, 502, 503, 504].includes(response.status) && attempt < 2) {
-      await abortableSleep(retryDelay(response, attempt), options.signal);
-      attempt += 1;
-      continue;
-    }
-
-    let code = "VERTEX_API";
-    if (response.status === 429) code = "VERTEX_RATE_LIMIT";
-    else if ([400, 401, 403].includes(response.status)
-      && /key|credential|permission|api|service account/i.test(errorMessage(data, ""))) code = "VERTEX_AUTH";
-    else if (response.status === 404) code = "MODEL_NOT_FOUND";
-    throw new AppError(errorMessage(data, `Vertex AI 錯誤 ${response.status}`), {
-      code,
-      retryAfter: Number(response.headers.get("retry-after")) || 0,
-      status: response.status
-    });
-  }
-  throw new AppError("Vertex AI 重試次數已用完", { code: "VERTEX_RETRY_EXHAUSTED" });
+  return googleGenerativeRequest(model, payload, options, {
+    requireKey: requireVertexKey,
+    buildUrl(safeModel) {
+      return `https://aiplatform.googleapis.com/v1/publishers/google/models/${encodeURIComponent(safeModel)}:generateContent`;
+    },
+    codePrefix: "VERTEX",
+    networkMessage: "無法連線到 Vertex AI，請檢查網路後再試",
+    modelInvalidMessage: "Vertex AI 模型名稱格式不正確",
+    retryExhaustedMessage: "Vertex AI 重試次數已用完",
+    apiErrorPrefix: "Vertex AI 錯誤",
+    authPattern: /key|credential|permission|api|service account/i
+  });
 }
 
 function openRouterPayload(model, payload) {
