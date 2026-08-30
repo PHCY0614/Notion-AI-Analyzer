@@ -3000,6 +3000,16 @@ function uniqueTopicNames(values) {
 }
 
 // ==== Single-page topic review resolution ====
+/**
+ * Resolves the next single-page AI 暫定主題 candidate. No AI.
+ * approve/replace/custom immediately PATCH that page: drop the candidate from
+ * AI 暫定主題 and add the chosen name to AI 主題; 整理狀態 becomes 已分析 only
+ * when that write leaves no remaining provisionals, otherwise 待主題確認.
+ * skip is local-only (temporarily_skipped) and does not write Notion.
+ * discard removes the candidate from AI 暫定主題 without adding AI 主題, and
+ * records it in discardedTopicNames. Local topicReview stays until
+ * remainingCandidates is empty.
+ */
 async function resolveTopicReview(action, replacementTopic = "", customTopic = "", rememberMapping = true) {
   if (stateCache.running) throw new AppError("目前仍在處理文章，請稍後再試", { code: "BUSY" });
   const review = normalizeTopicReview(stateCache.topicReview);
