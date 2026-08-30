@@ -1243,6 +1243,15 @@ function canRetryTopicOrganizerWithoutSchema(error) {
     .test(String(error?.message || ""));
 }
 
+/**
+ * Asks the AI provider to group unconfirmed AI 暫定主題 into standard-topic
+ * suggestions. Tries a strict JSON-schema request first; on a schema/parameter
+ * failure it retries in compatibility JSON mode; if the payload still fails
+ * validation it sends one repair request (at most three AI calls). Does not
+ * read or write Notion. On a second invalid payload it locally treats every
+ * candidate as unclassified instead of calling AI again. Updates stage via
+ * setStage; does not mutate the queue.
+ */
 async function requestOrganizerGroups({ aiCandidates, standards, config, controller, promptOptions }) {
   const { apiKey, model, provider } = await activeAiContext(config);
   const aiInput = aiCandidates.map(candidate => ({ name: candidate.name }));
@@ -1314,6 +1323,10 @@ async function requestOrganizerGroups({ aiCandidates, standards, config, control
   };
 }
 
+/**
+ * Turns validated organizer groups into the local review-card shape (ids,
+ * selectedAliases, impactCount, selected:false). No AI or Notion I/O.
+ */
 function buildOrganizerReviewGroups(groups, candidates) {
   return groups.map((group, index) => {
     const aliases = uniqueTopicNames(group.aliases);
@@ -1335,6 +1348,14 @@ function buildOrganizerReviewGroups(groups, candidates) {
   });
 }
 
+/**
+ * Builds a local topic-organizer review session from pages in 待主題整理 /
+ * 待主題確認. Reads Notion (and may update missing data source schema via
+ * readyNotion). Does not write AI 暫定主題 or AI 主題 on article pages.
+ * Candidates already mapped by existing options, page resolutions, or the
+ * confirmed dictionary skip AI and become confirmed groups. Remaining names
+ * go through requestOrganizerGroups. Stores the session in topicOrganizer.
+ */
 async function prepareTopicOrganizer() {
   if (stateCache.running) throw new AppError("目前正在分析文章，請先停止或等候完成", { code: "BUSY" });
   const controller = new AbortController();
@@ -1421,6 +1442,11 @@ async function prepareTopicOrganizer() {
 }
 
 // ==== Topic organizer session and drafts ====
+/**
+ * Projects topicOrganizer (and canRollback from topicRollback) for the
+ * options UI. Local only: no AI or Notion I/O. Omits applied/skipped groups
+ * and skipped unclassified names from the active lists.
+ */
 function topicOrganizerForUi() {
   const organizer = stateCache.topicOrganizer;
   if (!organizer) {
@@ -1473,6 +1499,10 @@ function topicOrganizerForUi() {
   };
 }
 
+/**
+ * Drops the local organizer review session. Does not write Notion, call AI,
+ * or clear topicRollback.
+ */
 async function clearTopicOrganizer() {
   if (stateCache.running) throw new AppError("目前正在處理其他工作，請稍後再清除建議", { code: "BUSY" });
   stateCache.topicOrganizer = null;
@@ -1480,6 +1510,11 @@ async function clearTopicOrganizer() {
   return topicOrganizerForUi();
 }
 
+/**
+ * Copies checkbox, standard-topic, and selected-alias drafts from the UI
+ * into the in-memory organizer groups. Local review state only; does not
+ * persist unless the caller does, and does not write Notion.
+ */
 function saveTopicOrganizerDrafts(organizer, groupsInput = []) {
   const storedGroups = new Map((organizer?.groups ?? []).map(group => [group.id, group]));
   for (const draft of groupsInput ?? []) {
@@ -1495,6 +1530,10 @@ function saveTopicOrganizerDrafts(organizer, groupsInput = []) {
   }
 }
 
+/**
+ * Marks one organizer group skipped, moves its aliases into unclassified,
+ * and persists local review state. Does not call AI or write article pages.
+ */
 async function skipTopicOrganizerGroup(groupId, groupsInput = []) {
   const organizer = stateCache.topicOrganizer;
   saveTopicOrganizerDrafts(organizer, groupsInput);
@@ -1523,6 +1562,15 @@ function mergeDictionaryEntries(existing, additions) {
   return [...map.values()];
 }
 
+/**
+ * Applies selected organizer groups: maps AI 暫定主題 aliases to confirmed
+ * AI 主題 on affected pages. Does not call AI. May PATCH the data source to
+ * add new topic options, then writes pages incrementally. Remaining unmatched
+ * provisionals stay as AI 暫定主題; status becomes 已分析 only when none remain
+ * on that page, otherwise 待主題確認. Persists progress after each successful
+ * page and retains an incomplete snapshot on interruption or failure. A later
+ * apply with the same operationKey resumes from that snapshot.
+ */
 async function applyTopicOrganizerGroups(groupsInput = []) {
   const organizer = stateCache.topicOrganizer;
   if (!organizer?.pages || stateCache.running) {
@@ -1707,6 +1755,13 @@ async function applyTopicOrganizerGroups(groupsInput = []) {
   return topicOrganizerForUi();
 }
 
+/**
+ * Resolves one unclassified AI 暫定主題 from the organizer session. skip is
+ * local-only. approve/replace/custom/discard write affected pages like apply
+ * (one candidate, incremental rollback snapshots) but do not use group
+ * cards: discard adds the name to discardedTopicNames instead of AI 主題.
+ * Does not call AI. readyNotion may update missing schema.
+ */
 async function resolveOrganizerUnclassified(candidateName, action, replacementTopic = "", customTopic = "") {
   const organizer = stateCache.topicOrganizer;
   if (!organizer?.pages || stateCache.running) {
@@ -1857,6 +1912,17 @@ async function resolveOrganizerUnclassified(candidateName, action, replacementTo
 }
 
 // ==== Topic organizer rollback ====
+/**
+ * Reverts the last organizer apply or manual unclassified write. Reads each
+ * snapshotted page and writes only when needed. Removes only topics recorded
+ * in addedTopics; restores 整理狀態 only if it still equals statusAfter;
+ * restores AI 暫定主題 only when the current value still matches
+ * provisionalAfter. These guards skip those fields when they have changed,
+ * but do not preserve every later edit. The topic dictionary and discarded-name
+ * list are restored from the snapshot. When an organizer session still exists,
+ * its saved group drafts, unclassified and manual-skipped state, and
+ * applied-candidate count are also restored. Does not call AI.
+ */
 async function rollbackTopicOrganizer() {
   if (stateCache.running) throw new AppError("請先停止目前的主題套用", { code: "BUSY" });
   const snapshot = stateCache.topicRollback;
@@ -3208,6 +3274,12 @@ async function inspectPage(pageId) {
   };
 }
 
+/**
+ * Opens a single-page topic review from the current Notion page's AI 暫定主題.
+ * Reads the page (readyNotion may update schema). If status is 待主題整理,
+ * writes 待主題確認 so the page matches the review session. Does not call AI
+ * and does not move names into AI 主題; resolveTopicReview does that later.
+ */
 async function reviewCurrentPageTopics(pageId) {
   ensureNoTopicReview();
   if (stateCache.running) {
@@ -3276,6 +3348,12 @@ async function reviewCurrentPageTopics(pageId) {
   return publicStatus();
 }
 
+/**
+ * Queues the current Notion page for single-review analysis (mode
+ * single_review) and schedules processOne. Reads the page via inspectPage;
+ * does not call AI. Does not write analysis fields or clear confirmed AI 主題
+ * here: processItem does that when the item actually runs.
+ */
 async function reanalyzePage(pageId, force = false) {
   ensureNoTopicReview();
   if (stateCache.running) throw new AppError("目前正在分析其他文章，請先停止或等候完成", { code: "BUSY" });
