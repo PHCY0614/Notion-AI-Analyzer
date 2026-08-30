@@ -20,6 +20,36 @@ const CURRENT_PROMPT_VERSION = "2026-08-26-1";
 const TOPIC_ORGANIZER_CACHE_VERSION = 10;
 const TOPIC_ORGANIZER_BATCH_LIMIT = G.TOPIC_ORGANIZER_BATCH_LIMIT;
 const DEFAULT_EXCLUDED_PERSON_TERMS = Object.freeze([]);
+const REQUEUE_TIMEOUT_CODES = new Set([
+  "AI_TIMEOUT",
+  "PAGE_READ_TIMEOUT",
+  "NOTION_WRITE_TIMEOUT"
+]);
+const RATE_LIMIT_CODES = new Set([
+  "GEMINI_RATE_LIMIT",
+  "VERTEX_RATE_LIMIT",
+  "OPENROUTER_RATE_LIMIT",
+  "NOTION_RATE_LIMIT"
+]);
+const SETUP_ERROR_CODES = new Set([
+  "GEMINI_AUTH",
+  "GEMINI_KEY_MISSING",
+  "VERTEX_AUTH",
+  "VERTEX_KEY_MISSING",
+  "OPENROUTER_AUTH",
+  "OPENROUTER_KEY_MISSING",
+  "OPENROUTER_PAID_CONFIRMATION_REQUIRED",
+  "MODEL_INVALID",
+  "MODEL_NOT_FOUND",
+  "SCHEMA_INVALID",
+  "NOTION_FIELDS_INVALID",
+  "NOTION_STATUS_FIELD_MISSING",
+  "NOTION_STATUS_FIELD_TYPE",
+  "NOTION_PENDING_OPTION_MISSING",
+  "NOTION_AUTH",
+  "NOTION_TOKEN_MISSING",
+  "TOPIC_OPTIONS_EMPTY"
+]);
 
 const DEFAULT_CONFIG = Object.freeze({
   aiProvider: "gemini",
@@ -2414,41 +2444,18 @@ async function processItem(item) {
       stateCache.paused = true;
       stateCache.mode = "paused";
       stateCache.lastError = "已攔截先前資料庫留下的本機佇列，沒有寫入任何頁面。請按「掃描資料庫」後再開始分析。";
-    } else if (["AI_TIMEOUT", "PAGE_READ_TIMEOUT", "NOTION_WRITE_TIMEOUT"].includes(error.code)) {
+    } else if (REQUEUE_TIMEOUT_CODES.has(error.code)) {
       stateCache.queue = uniqueItems([item, ...stateCache.queue]);
       stateCache.paused = true;
       stateCache.lastError = `${S.truncateMessage(error.message)}。文章已放回待分析；請自行決定重試或更換模型。`;
       await resetPageToPending(item, token);
-    } else if ([
-      "GEMINI_RATE_LIMIT",
-      "VERTEX_RATE_LIMIT",
-      "OPENROUTER_RATE_LIMIT",
-      "NOTION_RATE_LIMIT"
-    ].includes(error.code)) {
+    } else if (RATE_LIMIT_CODES.has(error.code)) {
       stateCache.queue = uniqueItems([item, ...stateCache.queue]);
       stateCache.paused = true;
       const wait = error.retryAfter ? `，建議 ${error.retryAfter} 秒後再繼續` : "，請稍後再繼續";
       stateCache.lastError = `API 已達速率或額度限制${wait}：${S.truncateMessage(error.message)}`;
       await resetPageToPending(item, token);
-    } else if ([
-      "GEMINI_AUTH",
-      "GEMINI_KEY_MISSING",
-      "VERTEX_AUTH",
-      "VERTEX_KEY_MISSING",
-      "OPENROUTER_AUTH",
-      "OPENROUTER_KEY_MISSING",
-      "OPENROUTER_PAID_CONFIRMATION_REQUIRED",
-      "MODEL_INVALID",
-      "MODEL_NOT_FOUND",
-      "SCHEMA_INVALID",
-      "NOTION_FIELDS_INVALID",
-      "NOTION_STATUS_FIELD_MISSING",
-      "NOTION_STATUS_FIELD_TYPE",
-      "NOTION_PENDING_OPTION_MISSING",
-      "NOTION_AUTH",
-      "NOTION_TOKEN_MISSING",
-      "TOPIC_OPTIONS_EMPTY"
-    ].includes(error.code)) {
+    } else if (SETUP_ERROR_CODES.has(error.code)) {
       stateCache.queue = uniqueItems([item, ...stateCache.queue]);
       stateCache.paused = true;
       stateCache.lastError = `設定或授權需要修正，佇列已暫停：${S.truncateMessage(error.message)}`;
