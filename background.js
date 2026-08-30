@@ -1115,8 +1115,13 @@ async function queryTopicOrganizerPages(dataSourceId, token, options = {}) {
   let cursor = "";
   let done = false;
   const eligibleStatuses = new Set([N.STATUS.topicOrganize, N.STATUS.topicReview]);
+  const queryPath = `/v1/data_sources/${dataSourceId}/query?${[
+    N.PROPERTY_NAMES.processingStatus,
+    N.PROPERTY_NAMES.provisionalTopics,
+    N.PROPERTY_NAMES.aiTopics
+  ].map(name => `filter_properties[]=${encodeURIComponent(name)}`).join("&")}`;
   do {
-    const response = await notionRequest(`/v1/data_sources/${dataSourceId}/query`, {
+    const response = await notionRequest(queryPath, {
       method: "POST",
       body: N.topicOrganizerQueryPayload(cursor, 50),
       signal: options.signal,
