@@ -1,6 +1,6 @@
 # Code structure
 
-Developer map for Notion AI Analyzer 0.6.1. Product copy is Traditional Chinese (Taiwan). This file is English. Do not treat it as a product guide; see `README.md` for user-facing behaviour.
+Developer map for Notion AI Analyzer 0.6.1. Product copy is Traditional Chinese (Taiwan). This file is English. Do not treat it as a product guide; see `README.md` or `README.zh-TW.md` for user-facing behaviour.
 
 Traditional Chinese (Taiwan): [`CODE_STRUCTURE.zh-TW.md`](CODE_STRUCTURE.zh-TW.md)
 
@@ -36,6 +36,7 @@ Libraries attach an IIFE to `globalThis` (`AnalyzerShared`, `AnalyzerPrompt`, `A
 | `options.html` / `options.css` | Settings and organizer page. |
 | `AGENTS.md` | Behavioural stability rules for refactors. |
 | `PRIVACY.md` / `PRIVACY.zh-TW.md` | English and Traditional Chinese privacy and data-flow documentation. |
+| `README.md` / `README.zh-TW.md` | English and Traditional Chinese product guide. |
 
 `background.js` aliases loaded modules as `S`, `P`, `N`, `G`.
 

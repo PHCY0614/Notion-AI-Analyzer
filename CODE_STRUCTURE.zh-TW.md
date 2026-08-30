@@ -1,6 +1,6 @@
 # 程式結構
 
-Notion AI Analyzer 0.6.1 的開發者地圖。產品介面是臺灣繁體中文。本檔為繁中對照。這不是產品使用說明，使用者行為請看 `README.md`。
+Notion AI Analyzer 0.6.1 的開發者地圖。產品介面是臺灣繁體中文。本檔為繁中對照。這不是產品使用說明，使用者行為請看 `README.zh-TW.md`。
 
 英文版：[`CODE_STRUCTURE.md`](CODE_STRUCTURE.md)
 
@@ -36,6 +36,7 @@ background.js service worker
 | `options.html`／`options.css` | 設定與主題整理頁。 |
 | `AGENTS.md` | 重構時的行為穩定規則。 |
 | `PRIVACY.md` / `PRIVACY.zh-TW.md` | 英文與繁中隱私及資料流說明。 |
+| `README.md` / `README.zh-TW.md` | 英文與繁中產品說明。 |
 
 `background.js` 把載入的模組簡稱為 `S`、`P`、`N`、`G`。
 
