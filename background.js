@@ -1225,6 +1225,98 @@ function canRetryTopicOrganizerWithoutSchema(error) {
     .test(String(error?.message || ""));
 }
 
+async function requestOrganizerGroups({ aiCandidates, standards, config, controller, promptOptions }) {
+  const { apiKey, model, provider } = await activeAiContext(config);
+  const aiInput = aiCandidates.map(candidate => ({ name: candidate.name }));
+  const candidateNames = aiCandidates.map(candidate => candidate.name);
+  const warnings = [];
+  let response;
+  try {
+    response = await timedAiRequest(
+      provider,
+      model,
+      G.buildTopicOrganizerRequest(aiInput, standards, model, promptOptions),
+      { apiKey, signal: controller.signal, timeoutMinutes: config.requestTimeoutMinutes }
+    );
+  } catch (error) {
+    if (!canRetryTopicOrganizerWithoutSchema(error)) throw error;
+    await setStage("改用相容 JSON 模式", { model, provider });
+    response = await timedAiRequest(
+      provider,
+      model,
+      G.buildTopicOrganizerCompatibilityRequest(aiInput, standards, model, promptOptions),
+      { apiKey, signal: controller.signal, timeoutMinutes: config.requestTimeoutMinutes }
+    );
+  }
+  await setStage("驗證主題建議", { model, provider });
+  let invalidRaw = "";
+  let checked;
+  try {
+    const parsed = G.parseJsonCandidate(response);
+    invalidRaw = parsed.raw;
+    checked = G.validateTopicOrganizer(parsed.value, candidateNames, standards);
+  } catch (error) {
+    if (error?.nonRetryable) throw error;
+    invalidRaw = error?.rawOutput || "";
+    checked = { ok: false, errors: [error?.message || "AI 回傳的內容不是有效 JSON"] };
+  }
+  if (!checked.ok) {
+    await setStage("修復主題建議格式", { model, provider });
+    const repairedResponse = await timedAiRequest(
+      provider,
+      model,
+      G.buildTopicOrganizerRepairRequest(
+        invalidRaw,
+        checked.errors,
+        candidateNames,
+        standards,
+        model,
+        promptOptions
+      ),
+      { apiKey, signal: controller.signal, timeoutMinutes: config.requestTimeoutMinutes }
+    );
+    let repaired;
+    try {
+      repaired = G.parseJsonCandidate(repairedResponse);
+      checked = G.validateTopicOrganizer(repaired.value, candidateNames, standards);
+    } catch (error) {
+      if (error?.nonRetryable) throw error;
+      checked = { ok: false, errors: [error?.message || "修復結果不是有效 JSON"] };
+    }
+    if (!checked.ok) {
+      warnings.push(`模型兩次都未回傳可用格式，本批候選已全部保留未分類：${checked.errors.join("；")}`);
+      checked = G.validateTopicOrganizer({ groups: [], unclassified_topics: candidateNames }, candidateNames, standards);
+    }
+  }
+  warnings.push(...(checked.warnings ?? []));
+  return {
+    groups: checked.value.groups,
+    unclassifiedTopics: checked.value.unclassified_topics,
+    warnings
+  };
+}
+
+function buildOrganizerReviewGroups(groups, candidates) {
+  return groups.map((group, index) => {
+    const aliases = uniqueTopicNames(group.aliases);
+    const evidence = organizerGroupEvidence(candidates, aliases);
+    return {
+      id: `group-${Date.now()}-${index}`,
+      standardTopic: group.standard_topic,
+      definition: group.definition,
+      aliases,
+      selectedAliases: [...aliases],
+      keepSeparate: group.keep_separate,
+      reason: group.reason,
+      confidence: group.confidence,
+      existing: group.existing,
+      confirmed: group.confirmed,
+      impactCount: evidence.impactCount,
+      selected: false
+    };
+  });
+}
+
 async function prepareTopicOrganizer() {
   if (stateCache.running) throw new AppError("目前正在分析文章，請先停止或等候完成", { code: "BUSY" });
   const controller = new AbortController();
@@ -1266,96 +1358,25 @@ async function prepareTopicOrganizer() {
       }));
     const permanentlyDiscarded = candidates.filter(item => item.permanentlyDiscarded && !item.preferredStandard);
     const aiCandidates = candidates.filter(item => !item.preferredStandard && !item.permanentlyDiscarded);
-    const candidateNames = aiCandidates.map(candidate => candidate.name);
     let aiGroups = [];
     let unclassified = permanentlyDiscarded.map(candidate => candidate.name);
     if (aiCandidates.length) {
-      const { apiKey, model, provider } = await activeAiContext(config);
-      const aiInput = aiCandidates.map(candidate => ({ name: candidate.name }));
-      let response;
-      try {
-        response = await timedAiRequest(
-          provider,
-          model,
-          G.buildTopicOrganizerRequest(aiInput, standards, model, organizerPromptOptions),
-          { apiKey, signal: controller.signal, timeoutMinutes: config.requestTimeoutMinutes }
-        );
-      } catch (error) {
-        if (!canRetryTopicOrganizerWithoutSchema(error)) throw error;
-        await setStage("改用相容 JSON 模式", { model, provider });
-        response = await timedAiRequest(
-          provider,
-          model,
-          G.buildTopicOrganizerCompatibilityRequest(aiInput, standards, model, organizerPromptOptions),
-          { apiKey, signal: controller.signal, timeoutMinutes: config.requestTimeoutMinutes }
-        );
-      }
-      await setStage("驗證主題建議", { model, provider });
-      let invalidRaw = "";
-      let checked;
-      try {
-        const parsed = G.parseJsonCandidate(response);
-        invalidRaw = parsed.raw;
-        checked = G.validateTopicOrganizer(parsed.value, candidateNames, standards);
-      } catch (error) {
-        if (error?.nonRetryable) throw error;
-        invalidRaw = error?.rawOutput || "";
-        checked = { ok: false, errors: [error?.message || "AI 回傳的內容不是有效 JSON"] };
-      }
-      if (!checked.ok) {
-        await setStage("修復主題建議格式", { model, provider });
-        const repairedResponse = await timedAiRequest(
-          provider,
-          model,
-          G.buildTopicOrganizerRepairRequest(
-            invalidRaw,
-            checked.errors,
-            candidateNames,
-            standards,
-            model,
-            organizerPromptOptions
-          ),
-          { apiKey, signal: controller.signal, timeoutMinutes: config.requestTimeoutMinutes }
-        );
-        let repaired;
-        try {
-          repaired = G.parseJsonCandidate(repairedResponse);
-          checked = G.validateTopicOrganizer(repaired.value, candidateNames, standards);
-        } catch (error) {
-          if (error?.nonRetryable) throw error;
-          checked = { ok: false, errors: [error?.message || "修復結果不是有效 JSON"] };
-        }
-        if (!checked.ok) {
-          organizerWarnings.push(`模型兩次都未回傳可用格式，本批候選已全部保留未分類：${checked.errors.join("；")}`);
-          checked = G.validateTopicOrganizer({ groups: [], unclassified_topics: candidateNames }, candidateNames, standards);
-        }
-      }
-      aiGroups = checked.value.groups;
-      unclassified = uniqueTopicNames([...unclassified, ...checked.value.unclassified_topics]);
-      organizerWarnings.push(...(checked.warnings ?? []));
+      const requested = await requestOrganizerGroups({
+        aiCandidates,
+        standards,
+        config,
+        controller,
+        promptOptions: organizerPromptOptions
+      });
+      aiGroups = requested.groups;
+      unclassified = uniqueTopicNames([...unclassified, ...requested.unclassifiedTopics]);
+      organizerWarnings.push(...requested.warnings);
     }
     const groups = mergeOrganizerGroups([...confirmedGroups, ...aiGroups]);
     const groupedKeys = new Set(groups.flatMap(group => group.aliases).map(N.topicKey));
     unclassified = uniqueTopicNames(unclassified)
       .filter(name => !groupedKeys.has(N.topicKey(name)));
-    const reviewGroups = groups.map((group, index) => {
-      const aliases = uniqueTopicNames(group.aliases);
-      const evidence = organizerGroupEvidence(candidates, aliases);
-      return {
-        id: `group-${Date.now()}-${index}`,
-        standardTopic: group.standard_topic,
-        definition: group.definition,
-        aliases,
-        selectedAliases: [...aliases],
-        keepSeparate: group.keep_separate,
-        reason: group.reason,
-        confidence: group.confidence,
-        existing: group.existing,
-        confirmed: group.confirmed,
-        impactCount: evidence.impactCount,
-        selected: false
-      };
-    });
+    const reviewGroups = buildOrganizerReviewGroups(groups, candidates);
     stateCache.topicOrganizer = {
       version: TOPIC_ORGANIZER_CACHE_VERSION,
       status: "review",
