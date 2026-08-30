@@ -2,6 +2,8 @@
 
 Developer map for Notion AI Analyzer 0.6.1. Product copy is Traditional Chinese (Taiwan). This file is English. Do not treat it as a product guide; see `README.md` for user-facing behaviour.
 
+Traditional Chinese (Taiwan): [`CODE_STRUCTURE.zh-TW.md`](CODE_STRUCTURE.zh-TW.md)
+
 The extension is Chrome Manifest V3, vanilla JavaScript, no bundler, no content scripts. The service worker owns Notion I/O, AI calls, queue processing, and Chrome storage. Popup and options are thin UIs that send `{ type, ... }` messages.
 
 ## Runtime

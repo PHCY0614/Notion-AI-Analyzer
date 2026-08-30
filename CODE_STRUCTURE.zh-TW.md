@@ -1,6 +1,8 @@
 # 程式結構
 
-Notion AI Analyzer 0.6.1 的開發者地圖。產品介面是臺灣繁體中文。本檔為繁中對照；英文版見 `CODE_STRUCTURE.md`。這不是產品使用說明，使用者行為請看 `README.md`。
+Notion AI Analyzer 0.6.1 的開發者地圖。產品介面是臺灣繁體中文。本檔為繁中對照。這不是產品使用說明，使用者行為請看 `README.md`。
+
+英文版：[`CODE_STRUCTURE.md`](CODE_STRUCTURE.md)
 
 此擴充功能為 Chrome Manifest V3、vanilla JavaScript，沒有 bundler，也沒有 content scripts。Service worker 負責 Notion I/O、AI 呼叫、佇列處理與 Chrome storage。Popup 與 options 是薄 UI，只傳送 `{ type, ... }` 訊息。
 
