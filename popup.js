@@ -135,7 +135,7 @@ function renderRecent(items) {
     reanalyze.type = "button";
     reanalyze.textContent = item.outcome === "failed" ? "重試" : "重新分析";
     reanalyze.addEventListener("click", () => {
-      if (item.outcome !== "failed" && !confirm("重新分析會覆寫這個頁面的 AI 欄位，確定繼續嗎？")) return;
+      if (item.outcome !== "failed" && !confirm("重新分析會重新產生 AI 分析結果；既有 AI 主題將被清除，之後需要重新確認主題。確定繼續嗎？")) return;
       void runAction("REANALYZE_PAGE", { pageId: item.id, force: item.outcome !== "failed" });
     });
 
@@ -386,7 +386,7 @@ buttons.current.addEventListener("click", () => {
     return;
   }
   if (currentAction === "reanalyze"
-    && !confirm("這個頁面已有分析內容。重新分析會更新 AI 標題、摘要、關鍵字與暫定主題，但不會清除既有 AI 主題。確定繼續嗎？")) return;
+    && !confirm("重新分析會重新產生 AI 分析結果；既有 AI 主題將被清除，之後需要重新確認主題。確定繼續嗎？")) return;
   void runAction("REANALYZE_PAGE", {
     pageId: currentPageInfo.id,
     force: currentAction === "reanalyze" || currentAction === "retry" || currentPageInfo.analyzed
