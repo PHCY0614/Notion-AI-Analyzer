@@ -8,6 +8,10 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function createAnalyzerShared() {
   "use strict";
 
+  /**
+   * Normalizes newlines, tabs, NBSP, and excess blank lines. Used before
+   * prompts, Notion writes, and visible-length checks. Does not decode HTML.
+   */
   function cleanText(value) {
     return String(value ?? "")
       .replace(/\r\n?/g, "\n")
@@ -17,6 +21,10 @@
       .trim();
   }
 
+  /**
+   * Returns a dashed lowercase UUID, or "" if the hex is not 32 digits.
+   * Does not talk to Notion.
+   */
   function normalizeUuid(hex) {
     const compact = String(hex ?? "").replace(/-/g, "").toLowerCase();
     if (!/^[0-9a-f]{32}$/.test(compact)) return "";
@@ -29,6 +37,10 @@
     ].join("-");
   }
 
+  /**
+   * Finds a Notion UUID in a URL or raw id. Returns "" when none matches.
+   * Popup INSPECT_PAGE passes the tab URL here.
+   */
   function extractNotionId(value) {
     const raw = String(value ?? "").trim();
     if (!raw) return "";
@@ -36,15 +48,27 @@
     return match ? normalizeUuid(match[0]) : "";
   }
 
+  /**
+   * Unicode visible length after stripping whitespace. Topic/title/summary
+   * caps use this, not String.length.
+   */
   function visibleLength(value) {
     return Array.from(String(value ?? "").replace(/\s/gu, "")).length;
   }
 
+  /**
+   * Strips a leading models/ prefix and keeps only [A-Za-z0-9._-].
+   * Invalid names become "".
+   */
   function normalizeModelName(value) {
     const name = String(value ?? "").trim().replace(/^models\//, "");
     return /^[A-Za-z0-9._-]+$/.test(name) ? name : "";
   }
 
+  /**
+   * Truncates a cleaned error/status string. Default 300 characters.
+   * Does not include API keys.
+   */
   function truncateMessage(value, maxLength = 300) {
     const text = cleanText(value);
     if (text.length <= maxLength) return text;
@@ -55,6 +79,11 @@
     return new Promise(resolve => setTimeout(resolve, milliseconds));
   }
 
+  /**
+   * Splits cleaned article text for long-article notes. Prefers paragraph
+   * breaks, then a nearby 。！？!? or newline. Default 78000 matches
+   * gemini.js CHUNK_TEXT_LIMIT. Empty input returns [].
+   */
   function chunkText(value, maxCharacters = 78000) {
     const text = cleanText(value);
     if (!text) return [];

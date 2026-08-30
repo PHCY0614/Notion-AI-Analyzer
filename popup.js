@@ -19,91 +19,20 @@ const replacementTopic = document.querySelector("#replacement-topic");
 const customTopic = document.querySelector("#custom-topic");
 const rememberTopicMapping = document.querySelector("#remember-topic-mapping");
 
+// ==== Shared custom select ====
+/**
+ * Popup wrapper around AnalyzerSelect. Amber modifier, empty label
+ * 「請選擇主題」, and document mousedown/Escape listeners. Does not mirror
+ * native hidden/disabled onto the root (options page does). Returns the
+ * { sync, close } controller; renderTopicReview calls sync after rebuilding
+ * replacement options.
+ */
 function enhanceTopicSelect(select) {
-  const root = document.createElement("div");
-  root.className = "custom-select custom-select--amber";
-  select.before(root);
-  root.append(select);
-  select.classList.add("custom-select__native");
-
-  const trigger = document.createElement("button");
-  trigger.id = `${select.id}-trigger`;
-  trigger.className = "custom-select__trigger";
-  trigger.type = "button";
-  trigger.setAttribute("aria-haspopup", "listbox");
-  trigger.setAttribute("aria-expanded", "false");
-  const value = document.createElement("span");
-  value.className = "custom-select__value";
-  const arrow = document.createElement("span");
-  arrow.className = "custom-select__arrow";
-  arrow.setAttribute("aria-hidden", "true");
-  arrow.textContent = "⌄";
-  trigger.append(value, arrow);
-
-  const menu = document.createElement("div");
-  menu.id = `${select.id}-menu`;
-  menu.className = "custom-select__menu";
-  menu.role = "listbox";
-  menu.hidden = true;
-  trigger.setAttribute("aria-controls", menu.id);
-  root.append(trigger, menu);
-
-  const originalLabel = document.querySelector(`label[for="${select.id}"]`);
-  if (originalLabel) originalLabel.htmlFor = trigger.id;
-
-  const controller = {
-    close() {
-      menu.hidden = true;
-      trigger.setAttribute("aria-expanded", "false");
-    },
-    sync() {
-      const selected = select.selectedOptions[0];
-      value.textContent = selected?.textContent || "請選擇主題";
-      value.title = value.textContent;
-      trigger.disabled = select.disabled || select.options.length === 0;
-      menu.replaceChildren(...[...select.options].map(option => {
-        const item = document.createElement("button");
-        item.className = "custom-select__option";
-        item.type = "button";
-        item.role = "option";
-        item.dataset.value = option.value;
-        item.setAttribute("aria-selected", String(option.selected));
-        const check = document.createElement("span");
-        check.className = `custom-select__check${option.selected ? "" : " custom-select__check--empty"}`;
-        check.setAttribute("aria-hidden", "true");
-        check.textContent = "✓";
-        const label = document.createElement("span");
-        label.textContent = option.textContent;
-        item.append(check, label);
-        item.addEventListener("click", () => {
-          select.value = option.value;
-          select.dispatchEvent(new Event("change", { bubbles: true }));
-          controller.sync();
-          controller.close();
-          trigger.focus();
-        });
-        return item;
-      }));
-    }
-  };
-  trigger.addEventListener("click", () => {
-    const opening = menu.hidden;
-    menu.hidden = !opening;
-    trigger.setAttribute("aria-expanded", String(opening));
+  return AnalyzerSelect.enhance(select, {
+    extraRootClass: "custom-select--amber",
+    emptyLabel: "請選擇主題",
+    attachDocumentListeners: true
   });
-  document.addEventListener("mousedown", event => {
-    if (!root.contains(event.target)) controller.close();
-  });
-  document.addEventListener("keydown", event => {
-    if (event.key === "Escape") controller.close();
-  });
-  new MutationObserver(() => controller.sync()).observe(select, {
-    attributes: true,
-    childList: true,
-    subtree: true
-  });
-  controller.sync();
-  return controller;
 }
 
 const replacementTopicDropdown = enhanceTopicSelect(replacementTopic);
@@ -116,7 +45,7 @@ const buttons = {
   approveTopic: document.querySelector("#approve-topic"),
   replaceTopic: document.querySelector("#replace-topic"),
   useCustomTopic: document.querySelector("#use-custom-topic"),
-  discardTopic: document.querySelector("#discard-topic")
+  skipTopic: document.querySelector("#skip-topic")
 };
 const organizeTopicsButton = document.querySelector("#organize-topics");
 let configured = false;
@@ -127,6 +56,11 @@ let currentSurface = "other";
 let currentAction = "analyze";
 let queueControlAction = "resume";
 
+/**
+ * Maps INSPECT_PAGE status onto the current-page button. 分析失敗 → retry,
+ * 待主題整理 / 待主題確認 → review, 已分析 or analyzed → reanalyze, else
+ * analyze. Does not send messages.
+ */
 function currentPageAction(info) {
   if (!info) return { action: "analyze", label: "分析目前頁面" };
   if (info.status === "分析失敗") return { action: "retry", label: "重試目前頁面" };
@@ -136,6 +70,12 @@ function currentPageAction(info) {
   return { action: "analyze", label: "分析目前頁面" };
 }
 
+// ==== Background messaging ====
+/**
+ * chrome.runtime.sendMessage wrapper. Throws the background AppError
+ * message when ok is false. Popup state comes from GET_STATUS; configured
+ * comes from GET_CONFIG. Does not poll by itself.
+ */
 async function send(type, extra = {}) {
   const response = await chrome.runtime.sendMessage({ type, ...extra });
   if (!response?.ok) throw new Error(response?.error?.message || "操作失敗");
@@ -191,6 +131,13 @@ async function copyText(value) {
   }
 }
 
+// ==== Recent list ====
+/**
+ * Renders GET_STATUS.recent. Failed rows offer retry (REANALYZE_PAGE without
+ * force) and copy-log; others confirm then REANALYZE_PAGE with force.
+ * Non-failed rows confirm that existing AI 主題 will be cleared before
+ * REANALYZE_PAGE runs with force.
+ */
 function renderRecent(items) {
   if (!items?.length) {
     recentList.innerHTML = '<p class="empty">尚無分析紀錄</p>';
@@ -214,7 +161,7 @@ function renderRecent(items) {
     reanalyze.type = "button";
     reanalyze.textContent = item.outcome === "failed" ? "重試" : "重新分析";
     reanalyze.addEventListener("click", () => {
-      if (item.outcome !== "failed" && !confirm("重新分析會覆寫這個頁面的 AI 欄位，確定繼續嗎？")) return;
+      if (item.outcome !== "failed" && !confirm("重新分析會重新產生 AI 分析結果；既有 AI 主題將被清除，之後需要重新確認主題。確定繼續嗎？")) return;
       void runAction("REANALYZE_PAGE", { pageId: item.id, force: item.outcome !== "failed" });
     });
 
@@ -254,6 +201,14 @@ function renderRecent(items) {
   }));
 }
 
+// ==== Single-page topic review ====
+/**
+ * Shows or hides the single-page AI 暫定主題 review card from
+ * GET_STATUS.topicReview. existingTopics chips are already-confirmed /
+ * selected names, not remaining provisionals. Replacement options are
+ * sorted by closestExisting. 「這次暫不處理」 stays enabled unless
+ * canDiscard is false; that button sends skip, not discard.
+ */
 function renderTopicReview(review) {
   topicReview.hidden = !review;
   if (!review) {
@@ -322,10 +277,19 @@ function renderTopicReview(review) {
   replacementTopicDropdown.sync();
   buttons.replaceTopic.disabled = actionBusy || options.length === 0;
   buttons.useCustomTopic.disabled = actionBusy || !customTopic.value.trim();
-  buttons.discardTopic.disabled = actionBusy || review.canDiscard === false;
+  buttons.skipTopic.disabled = actionBusy || review.canDiscard === false;
   buttons.approveTopic.disabled = actionBusy;
 }
 
+// ==== Status and toolbar ====
+/**
+ * Applies GET_STATUS to the popup. Reviewing, running/current/stage, paused
+ * queue, and currentSurface (single / database / other) control labels,
+ * hidden, and disabled. Topic review blocks batch/scan/retry/organize and
+ * current-page analyze/review. A live single_review run switches the current
+ * button to STOP_ANALYSIS. queueControl is shown on a database tab or
+ * whenever a batch is active, even on another tab.
+ */
 function renderStatus(state) {
   const running = Boolean(state.running || state.current || state.stage);
   const paused = Boolean(state.paused);
@@ -399,6 +363,13 @@ function renderStatus(state) {
     : pageAction.label;
 }
 
+// ==== Current-page inspection ====
+/**
+ * Classifies the active tab. Non-Notion stays surface other. A Notion URL
+ * is first treated as a database view, then INSPECT_PAGE; success becomes
+ * surface single with page info. Failure leaves surface database (batch
+ * buttons) and clears page info. INSPECT_PAGE goes through readyNotion.
+ */
 async function inspectCurrentPage() {
   currentPageInfo = null;
   currentSurface = "other";
@@ -417,6 +388,12 @@ async function inspectCurrentPage() {
   }
 }
 
+// ==== Polling and commands ====
+/**
+ * Loads GET_CONFIG and GET_STATUS. configured requires notionTarget, token,
+ * AI key, and activeModel. Does not re-inspect the tab. Polled every 1.5s
+ * while actionBusy is false.
+ */
 async function refresh() {
   try {
     const [config, state] = await Promise.all([send("GET_CONFIG"), send("GET_STATUS")]);
@@ -429,6 +406,12 @@ async function refresh() {
   }
 }
 
+/**
+ * Sends one command, disabling toolbar buttons until refresh. Re-inspects
+ * the tab after REVIEW_CURRENT_PAGE_TOPICS or RESOLVE_TOPIC_REVIEW. Current
+ * button: stop, review, reanalyze (force), or analyze/retry via
+ * REANALYZE_PAGE. #skip-topic sends RESOLVE_TOPIC_REVIEW action skip.
+ */
 async function runAction(type, extra = {}) {
   if (actionBusy) return;
   actionBusy = true;
@@ -465,7 +448,7 @@ buttons.current.addEventListener("click", () => {
     return;
   }
   if (currentAction === "reanalyze"
-    && !confirm("這個頁面已有分析內容。重新分析會更新 AI 標題、摘要、關鍵字與暫定主題，但不會清除既有 AI 主題。確定繼續嗎？")) return;
+    && !confirm("重新分析會重新產生 AI 分析結果；既有 AI 主題將被清除，之後需要重新確認主題。確定繼續嗎？")) return;
   void runAction("REANALYZE_PAGE", {
     pageId: currentPageInfo.id,
     force: currentAction === "reanalyze" || currentAction === "retry" || currentPageInfo.analyzed
@@ -491,7 +474,7 @@ buttons.useCustomTopic.addEventListener("click", () => runAction("RESOLVE_TOPIC_
   customTopic: customTopic.value,
   rememberMapping: rememberTopicMapping.checked
 }));
-buttons.discardTopic.addEventListener("click", () => runAction("RESOLVE_TOPIC_REVIEW", { action: "skip" }));
+buttons.skipTopic.addEventListener("click", () => runAction("RESOLVE_TOPIC_REVIEW", { action: "skip" }));
 customTopic.addEventListener("input", () => {
   buttons.useCustomTopic.disabled = actionBusy || !customTopic.value.trim();
 });

@@ -2,6 +2,7 @@
 
 importScripts("shared.js", "prompt.js", "notion.js", "gemini.js");
 
+// ==== Constants and defaults ====
 const S = globalThis.AnalyzerShared;
 const P = globalThis.AnalyzerPrompt;
 const N = globalThis.AnalyzerNotion;
@@ -20,6 +21,36 @@ const CURRENT_PROMPT_VERSION = "2026-08-26-1";
 const TOPIC_ORGANIZER_CACHE_VERSION = 10;
 const TOPIC_ORGANIZER_BATCH_LIMIT = G.TOPIC_ORGANIZER_BATCH_LIMIT;
 const DEFAULT_EXCLUDED_PERSON_TERMS = Object.freeze([]);
+const REQUEUE_TIMEOUT_CODES = new Set([
+  "AI_TIMEOUT",
+  "PAGE_READ_TIMEOUT",
+  "NOTION_WRITE_TIMEOUT"
+]);
+const RATE_LIMIT_CODES = new Set([
+  "GEMINI_RATE_LIMIT",
+  "VERTEX_RATE_LIMIT",
+  "OPENROUTER_RATE_LIMIT",
+  "NOTION_RATE_LIMIT"
+]);
+const SETUP_ERROR_CODES = new Set([
+  "GEMINI_AUTH",
+  "GEMINI_KEY_MISSING",
+  "VERTEX_AUTH",
+  "VERTEX_KEY_MISSING",
+  "OPENROUTER_AUTH",
+  "OPENROUTER_KEY_MISSING",
+  "OPENROUTER_PAID_CONFIRMATION_REQUIRED",
+  "MODEL_INVALID",
+  "MODEL_NOT_FOUND",
+  "SCHEMA_INVALID",
+  "NOTION_FIELDS_INVALID",
+  "NOTION_STATUS_FIELD_MISSING",
+  "NOTION_STATUS_FIELD_TYPE",
+  "NOTION_PENDING_OPTION_MISSING",
+  "NOTION_AUTH",
+  "NOTION_TOKEN_MISSING",
+  "TOPIC_OPTIONS_EMPTY"
+]);
 
 const DEFAULT_CONFIG = Object.freeze({
   aiProvider: "gemini",
@@ -80,17 +111,19 @@ class AppError extends Error {
   }
 }
 
+// ==== Runtime module state ====
 let initializePromise = null;
 let stateCache = null;
 let activeAbortController = null;
 let processingPromise = null;
 let preparedDataSourceId = "";
 
+// ==== Configuration normalization ====
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function normalizeExcludedPersonTerms(value) {
+function normalizeShortNameList(value) {
   const source = Array.isArray(value)
     ? value
     : String(value ?? "").split(/[\n\r,，、]+/u);
@@ -103,6 +136,10 @@ function normalizeExcludedPersonTerms(value) {
     result.push(name);
     return result;
   }, []);
+}
+
+function normalizeExcludedPersonTerms(value) {
+  return normalizeShortNameList(value);
 }
 
 function normalizeTopicAliases(value) {
@@ -188,18 +225,19 @@ function normalizeTopicReview(review) {
     : Array.isArray(result.topic_candidates) ? result.topic_candidates : legacyCandidate(result);
   return {
     ...review,
-    approvedNewTopics: normalizeExcludedPersonTerms(review.approvedNewTopics ?? []),
+    approvedNewTopics: normalizeShortNameList(review.approvedNewTopics ?? []),
     candidateTotal: Number(review.candidateTotal) || remainingCandidates.length,
     decisions: Array.isArray(review.decisions) ? review.decisions : [],
     remainingCandidates,
-    skippedCandidates: normalizeExcludedPersonTerms(review.skippedCandidates ?? []),
-    originalFinalTopics: normalizeExcludedPersonTerms(review.originalFinalTopics ?? []),
+    skippedCandidates: normalizeShortNameList(review.skippedCandidates ?? []),
+    originalFinalTopics: normalizeShortNameList(review.originalFinalTopics ?? []),
     selectedExistingTopics: Array.isArray(review.selectedExistingTopics)
       ? review.selectedExistingTopics
       : Array.isArray(result.ai_topics) ? result.ai_topics : []
   };
 }
 
+// ==== State initialization and persistence ====
 async function initialize() {
   if (initializePromise) return initializePromise;
   initializePromise = (async () => {
@@ -299,6 +337,7 @@ async function persistState() {
   await chrome.storage.local.set({ [STATE_KEY]: stateCache });
 }
 
+// ==== Secret management ====
 async function readSecret(key) {
   const sessionValue = (await chrome.storage.session.get(key))[key];
   if (sessionValue) return sessionValue;
@@ -355,6 +394,7 @@ async function requireOpenRouterKey() {
   return key;
 }
 
+// ==== AI provider routing ====
 function normalizeAiProvider(value) {
   return ["vertex", "openrouter"].includes(value) ? value : "gemini";
 }
@@ -397,6 +437,7 @@ async function activeAiContext(config) {
   };
 }
 
+// ==== HTTP helpers ====
 function errorMessage(data, fallback) {
   return data?.message || data?.error?.message || fallback;
 }
@@ -405,6 +446,22 @@ function retryDelay(response, attempt) {
   const retryAfter = Number(response?.headers?.get("retry-after"));
   return (Number.isFinite(retryAfter) ? retryAfter : Math.min(2 ** attempt, 20)) * 1000
     + Math.floor(Math.random() * 180);
+}
+
+// Every HTTP call below reads the response body as text first (so a non-JSON
+// error page never throws before we can build a useful AppError), then tries
+// to parse it as JSON. `fallbackShape` controls what we return when parsing
+// fails: Notion's error helper reads `data.message`, while every AI provider
+// helper reads `data.error.message` (see errorMessage() above, which checks
+// both paths). Keeping both shapes lets each caller stay unchanged.
+async function readJsonResponse(response, fallbackShape = "error") {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallbackShape === "message" ? { message: text } : { error: { message: text } };
+  }
 }
 
 function abortableSleep(milliseconds, signal) {
@@ -424,6 +481,7 @@ function abortableSleep(milliseconds, signal) {
   });
 }
 
+// ==== Notion transport ====
 async function notionRequest(path, options = {}) {
   const token = options.token || await requireNotionToken();
   const method = options.method || "GET";
@@ -452,13 +510,7 @@ async function notionRequest(path, options = {}) {
       continue;
     }
 
-    const text = await response.text();
-    let data = {};
-    try {
-      data = text ? JSON.parse(text) : {};
-    } catch {
-      data = { message: text };
-    }
+    const data = await readJsonResponse(response, "message");
     if (response.ok) return data;
 
     const transient = response.status === 429 || [500, 502, 503, 504, 529].includes(response.status);
@@ -480,16 +532,17 @@ async function notionRequest(path, options = {}) {
   throw new AppError("Notion API 重試次數已用完", { code: "NOTION_RETRY_EXHAUSTED" });
 }
 
-async function geminiRequest(model, payload, options = {}) {
-  const apiKey = options.apiKey || await requireGeminiKey();
+// ==== AI transport ====
+async function googleGenerativeRequest(model, payload, options, descriptor) {
+  const apiKey = options.apiKey || await descriptor.requireKey();
   const safeModel = S.normalizeModelName(model);
-  if (!safeModel) throw new AppError("Gemini 模型名稱格式不正確", { code: "MODEL_INVALID" });
+  if (!safeModel) throw new AppError(descriptor.modelInvalidMessage, { code: "MODEL_INVALID" });
   let attempt = 0;
   while (attempt < 3) {
     let response;
     try {
       response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(safeModel)}:generateContent`,
+        descriptor.buildUrl(safeModel),
         {
           method: "POST",
           headers: {
@@ -503,20 +556,14 @@ async function geminiRequest(model, payload, options = {}) {
     } catch (error) {
       if (error?.name === "AbortError") throw error;
       if (attempt >= 2) {
-        throw new AppError("無法連線到 Gemini API，請檢查網路後再試", { code: "GEMINI_NETWORK" });
+        throw new AppError(descriptor.networkMessage, { code: `${descriptor.codePrefix}_NETWORK` });
       }
       await abortableSleep(Math.min(2 ** attempt, 4) * 1000, options.signal);
       attempt += 1;
       continue;
     }
 
-    const text = await response.text();
-    let data = {};
-    try {
-      data = text ? JSON.parse(text) : {};
-    } catch {
-      data = { error: { message: text } };
-    }
+    const data = await readJsonResponse(response);
     if (response.ok) return data;
 
     if ([500, 502, 503, 504].includes(response.status) && attempt < 2) {
@@ -525,77 +572,48 @@ async function geminiRequest(model, payload, options = {}) {
       continue;
     }
 
-    let code = "GEMINI_API";
-    if (response.status === 429) code = "GEMINI_RATE_LIMIT";
+    let code = `${descriptor.codePrefix}_API`;
+    if (response.status === 429) code = `${descriptor.codePrefix}_RATE_LIMIT`;
     else if ([400, 401, 403].includes(response.status)
-      && /key|credential|permission|api/i.test(errorMessage(data, ""))) code = "GEMINI_AUTH";
+      && descriptor.authPattern.test(errorMessage(data, ""))) code = `${descriptor.codePrefix}_AUTH`;
     else if (response.status === 404) code = "MODEL_NOT_FOUND";
-    throw new AppError(errorMessage(data, `Gemini API 錯誤 ${response.status}`), {
+    throw new AppError(errorMessage(data, `${descriptor.apiErrorPrefix} ${response.status}`), {
       code,
       retryAfter: Number(response.headers.get("retry-after")) || 0,
       status: response.status
     });
   }
-  throw new AppError("Gemini API 重試次數已用完", { code: "GEMINI_RETRY_EXHAUSTED" });
+  throw new AppError(descriptor.retryExhaustedMessage, { code: `${descriptor.codePrefix}_RETRY_EXHAUSTED` });
+}
+
+async function geminiRequest(model, payload, options = {}) {
+  return googleGenerativeRequest(model, payload, options, {
+    requireKey: requireGeminiKey,
+    buildUrl(safeModel) {
+      return `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(safeModel)}:generateContent`;
+    },
+    codePrefix: "GEMINI",
+    networkMessage: "無法連線到 Gemini API，請檢查網路後再試",
+    modelInvalidMessage: "Gemini 模型名稱格式不正確",
+    retryExhaustedMessage: "Gemini API 重試次數已用完",
+    apiErrorPrefix: "Gemini API 錯誤",
+    authPattern: /key|credential|permission|api/i
+  });
 }
 
 async function vertexRequest(model, payload, options = {}) {
-  const apiKey = options.apiKey || await requireVertexKey();
-  const safeModel = S.normalizeModelName(model);
-  if (!safeModel) throw new AppError("Vertex AI 模型名稱格式不正確", { code: "MODEL_INVALID" });
-  let attempt = 0;
-  while (attempt < 3) {
-    let response;
-    try {
-      response = await fetch(
-        `https://aiplatform.googleapis.com/v1/publishers/google/models/${encodeURIComponent(safeModel)}:generateContent`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-goog-api-key": apiKey
-          },
-          body: JSON.stringify(payload),
-          signal: options.signal
-        }
-      );
-    } catch (error) {
-      if (error?.name === "AbortError") throw error;
-      if (attempt >= 2) {
-        throw new AppError("無法連線到 Vertex AI，請檢查網路後再試", { code: "VERTEX_NETWORK" });
-      }
-      await abortableSleep(Math.min(2 ** attempt, 4) * 1000, options.signal);
-      attempt += 1;
-      continue;
-    }
-
-    const text = await response.text();
-    let data = {};
-    try {
-      data = text ? JSON.parse(text) : {};
-    } catch {
-      data = { error: { message: text } };
-    }
-    if (response.ok) return data;
-
-    if ([500, 502, 503, 504].includes(response.status) && attempt < 2) {
-      await abortableSleep(retryDelay(response, attempt), options.signal);
-      attempt += 1;
-      continue;
-    }
-
-    let code = "VERTEX_API";
-    if (response.status === 429) code = "VERTEX_RATE_LIMIT";
-    else if ([400, 401, 403].includes(response.status)
-      && /key|credential|permission|api|service account/i.test(errorMessage(data, ""))) code = "VERTEX_AUTH";
-    else if (response.status === 404) code = "MODEL_NOT_FOUND";
-    throw new AppError(errorMessage(data, `Vertex AI 錯誤 ${response.status}`), {
-      code,
-      retryAfter: Number(response.headers.get("retry-after")) || 0,
-      status: response.status
-    });
-  }
-  throw new AppError("Vertex AI 重試次數已用完", { code: "VERTEX_RETRY_EXHAUSTED" });
+  return googleGenerativeRequest(model, payload, options, {
+    requireKey: requireVertexKey,
+    buildUrl(safeModel) {
+      return `https://aiplatform.googleapis.com/v1/publishers/google/models/${encodeURIComponent(safeModel)}:generateContent`;
+    },
+    codePrefix: "VERTEX",
+    networkMessage: "無法連線到 Vertex AI，請檢查網路後再試",
+    modelInvalidMessage: "Vertex AI 模型名稱格式不正確",
+    retryExhaustedMessage: "Vertex AI 重試次數已用完",
+    apiErrorPrefix: "Vertex AI 錯誤",
+    authPattern: /key|credential|permission|api|service account/i
+  });
 }
 
 function openRouterPayload(model, payload) {
@@ -685,13 +703,7 @@ async function openRouterRequest(model, payload, options = {}) {
       continue;
     }
 
-    const text = await response.text();
-    let data = {};
-    try {
-      data = text ? JSON.parse(text) : {};
-    } catch {
-      data = { error: { message: text } };
-    }
+    const data = await readJsonResponse(response);
     if (response.ok) return normalizeOpenRouterResponse(data);
 
     if ([500, 502, 503, 504].includes(response.status) && attempt < 2) {
@@ -725,6 +737,7 @@ async function aiRequest(provider, model, payload, options = {}) {
   return geminiRequest(model, payload, options);
 }
 
+// ==== Processing stage updates ====
 async function setStage(name, detail = {}) {
   if (!stateCache) return;
   stateCache.stage = {
@@ -735,6 +748,7 @@ async function setStage(name, detail = {}) {
   await persistState();
 }
 
+// ==== Timeout and cancellation utilities ====
 async function timedAiRequest(provider, model, payload, options = {}) {
   const minutes = Number(options.timeoutMinutes);
   const timeoutMs = Number.isFinite(minutes) && minutes > 0 ? minutes * 60 * 1000 : 0;
@@ -796,6 +810,7 @@ function notionWriteWithTimeout(path, options, parentSignal) {
   );
 }
 
+// ==== AI model discovery and connection diagnostics ====
 async function listOpenRouterModels(apiKey = "") {
   const key = apiKey || await requireOpenRouterKey();
   let response;
@@ -806,13 +821,7 @@ async function listOpenRouterModels(apiKey = "") {
   } catch {
     throw new AppError("無法連線到 OpenRouter，請檢查網路後再試", { code: "OPENROUTER_NETWORK" });
   }
-  const text = await response.text();
-  let data = {};
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch {
-    data = { error: { message: text } };
-  }
+  const data = await readJsonResponse(response);
   if (!response.ok) {
     throw new AppError(errorMessage(data, `OpenRouter 模型清單錯誤 ${response.status}`), {
       code: [401, 403].includes(response.status) ? "OPENROUTER_AUTH" : "OPENROUTER_API",
@@ -896,13 +905,7 @@ async function testVertexModel(config) {
       body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "連線測試" }] }] })
     }
   );
-  const text = await response.text();
-  let data = {};
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch {
-    data = { error: { message: text } };
-  }
+  const data = await readJsonResponse(response);
   if (!response.ok) {
     throw new AppError(errorMessage(data, `Vertex AI 連線測試錯誤 ${response.status}`), {
       code: [400, 401, 403].includes(response.status) ? "VERTEX_AUTH" : "VERTEX_API",
@@ -927,13 +930,7 @@ async function listGeminiModels(apiKey = "") {
     } catch {
       throw new AppError("無法連線到 Gemini API，請檢查網路後再試", { code: "GEMINI_NETWORK" });
     }
-    const text = await response.text();
-    let data = {};
-    try {
-      data = text ? JSON.parse(text) : {};
-    } catch {
-      data = { error: { message: text } };
-    }
+    const data = await readJsonResponse(response);
     if (!response.ok) {
       const code = [400, 401, 403].includes(response.status) ? "GEMINI_AUTH" : "GEMINI_API";
       throw new AppError(errorMessage(data, `Gemini API 錯誤 ${response.status}`), {
@@ -947,6 +944,17 @@ async function listGeminiModels(apiKey = "") {
   return G.usableModels({ models });
 }
 
+// ==== Notion schema and scanning ====
+/**
+ * Resolves a Notion database URL, database UUID, or data source UUID to one
+ * data source. extractNotionId takes a UUID from notionTarget or the stored
+ * dataSourceId (hyphenated or compact). GET /v1/data_sources/{id} first; a
+ * 404 means treat the same UUID as a database and GET /v1/databases/{id}.
+ * A database must have exactly one data_sources entry or this throws
+ * DATA_SOURCE_MISSING / MULTIPLE_DATA_SOURCES (paste the Data Source ID).
+ * Other API errors are rethrown. GET only: no schema PATCH. Returns the
+ * data source plus dataSourceId and databaseId.
+ */
 async function resolveDataSource(config, token) {
   const rawId = S.extractNotionId(config.notionTarget || config.dataSourceId);
   if (!rawId) {
@@ -978,6 +986,18 @@ async function resolveDataSource(config, token) {
   return { dataSource, dataSourceId: dataSource.id, databaseId: database.id };
 }
 
+/**
+ * Makes the configured data source usable for analysis. Prefers GET of the
+ * stored dataSourceId; on 404 or a missing id, calls resolveDataSource. Any
+ * schemaPlan error throws before PATCH: missing 整理狀態, a non-select
+ * 整理狀態, a select without 待分析, or a wrong type on AI 標題 / AI 主題 /
+ * AI 暫定主題 / AI 關鍵字 / AI 摘要. Those failures block analysis. Missing
+ * analysis properties other than 整理狀態 may be PATCHed in. If 整理狀態
+ * already has 待分析, missing other status options may be PATCHed while
+ * existing option ids are kept; 整理狀態 is never created or type-converted
+ * here. Copies preferExistingTopics from the notionTarget UUID key onto the
+ * data source key, then writeConfig with resolved ids. Not read-only.
+ */
 async function ensureSchema(config, token) {
   let resolved;
   if (config.dataSourceId) {
@@ -1020,6 +1040,15 @@ async function ensureSchema(config, token) {
   return { config: nextConfig, dataSource, plan };
 }
 
+/**
+ * Shared credentials/config/schema gate for scans, queue start, organizer
+ * apply, page inspection, and connection tests. Requires a Notion token,
+ * reads config, then ensureSchema (may PATCH missing schema and persists
+ * resolved ids). On NOTION_STATUS_FIELD_MISSING, NOTION_STATUS_FIELD_TYPE,
+ * or NOTION_PENDING_OPTION_MISSING, records databaseCheck before rethrowing so
+ * the UI can show the 整理狀態 setup failure. Other setup errors propagate
+ * without that write. Sets preparedDataSourceId on success. Not read-only.
+ */
 async function readyNotion() {
   const token = await requireNotionToken();
   const config = await readConfig();
@@ -1086,8 +1115,13 @@ async function queryTopicOrganizerPages(dataSourceId, token, options = {}) {
   let cursor = "";
   let done = false;
   const eligibleStatuses = new Set([N.STATUS.topicOrganize, N.STATUS.topicReview]);
+  const queryPath = `/v1/data_sources/${dataSourceId}/query?${[
+    N.PROPERTY_NAMES.processingStatus,
+    N.PROPERTY_NAMES.provisionalTopics,
+    N.PROPERTY_NAMES.aiTopics
+  ].map(name => `filter_properties[]=${encodeURIComponent(name)}`).join("&")}`;
   do {
-    const response = await notionRequest(`/v1/data_sources/${dataSourceId}/query`, {
+    const response = await notionRequest(queryPath, {
       method: "POST",
       body: N.topicOrganizerQueryPayload(cursor, 50),
       signal: options.signal,
@@ -1109,6 +1143,7 @@ async function queryTopicOrganizerPages(dataSourceId, token, options = {}) {
   return pages;
 }
 
+// ==== Topic organizer preparation ====
 function topicDictionaryLookup(config = {}, allowedTargets = null) {
   const lookup = new Map();
   const allowed = allowedTargets == null
@@ -1126,8 +1161,8 @@ function topicDictionaryLookup(config = {}, allowedTargets = null) {
   return lookup;
 }
 
-function pageResolution(config, pageId, candidate) {
-  return S.cleanText(normalizeTopicPageResolutions(config.topicPageResolutions)?.[pageId]?.[N.topicKey(candidate)]);
+function pageResolution(resolutions, pageId, candidate) {
+  return S.cleanText(resolutions?.[pageId]?.[N.topicKey(candidate)]);
 }
 
 function topicOrganizerCandidates(pages, options = [], config = {}, limit = TOPIC_ORGANIZER_BATCH_LIMIT) {
@@ -1135,13 +1170,14 @@ function topicOrganizerCandidates(pages, options = [], config = {}, limit = TOPI
   const existing = new Map(validTopicOptions(options).map(option => [N.topicKey(option.name), option.name]));
   const dictionary = topicDictionaryLookup(config, existing.keys());
   const discardedKeys = new Set(normalizeDiscardedTopicNames(config.discardedTopicNames).map(N.topicKey));
+  const resolutions = normalizeTopicPageResolutions(config.topicPageResolutions);
   for (const page of pages ?? []) {
     const finalKeys = new Set((page.aiTopics ?? []).map(N.topicKey));
     for (const rawName of uniqueTopicNames(page.provisionalTopics ?? [])) {
       const name = S.cleanText(rawName);
       const key = N.topicKey(name);
       if (!key) continue;
-      const pageTarget = pageResolution(config, page.id, name);
+      const pageTarget = pageResolution(resolutions, page.id, name);
       const preferredStandard = existing.get(key)
         || (existing.has(N.topicKey(pageTarget)) ? existing.get(N.topicKey(pageTarget)) : "")
         || dictionary.get(key)
@@ -1243,6 +1279,119 @@ function canRetryTopicOrganizerWithoutSchema(error) {
     .test(String(error?.message || ""));
 }
 
+/**
+ * Asks the AI provider to group unconfirmed AI 暫定主題 into standard-topic
+ * suggestions. Tries a strict JSON-schema request first; on a schema/parameter
+ * failure it retries in compatibility JSON mode; if the payload still fails
+ * validation it sends one repair request (at most three AI calls). Does not
+ * read or write Notion. On a second invalid payload it locally treats every
+ * candidate as unclassified instead of calling AI again. Updates stage via
+ * setStage; does not mutate the queue.
+ */
+async function requestOrganizerGroups({ aiCandidates, standards, config, controller, promptOptions }) {
+  const { apiKey, model, provider } = await activeAiContext(config);
+  const aiInput = aiCandidates.map(candidate => ({ name: candidate.name }));
+  const candidateNames = aiCandidates.map(candidate => candidate.name);
+  const warnings = [];
+  let response;
+  try {
+    response = await timedAiRequest(
+      provider,
+      model,
+      G.buildTopicOrganizerRequest(aiInput, standards, model, promptOptions),
+      { apiKey, signal: controller.signal, timeoutMinutes: config.requestTimeoutMinutes }
+    );
+  } catch (error) {
+    if (!canRetryTopicOrganizerWithoutSchema(error)) throw error;
+    await setStage("改用相容 JSON 模式", { model, provider });
+    response = await timedAiRequest(
+      provider,
+      model,
+      G.buildTopicOrganizerCompatibilityRequest(aiInput, standards, model, promptOptions),
+      { apiKey, signal: controller.signal, timeoutMinutes: config.requestTimeoutMinutes }
+    );
+  }
+  await setStage("驗證主題建議", { model, provider });
+  let invalidRaw = "";
+  let checked;
+  try {
+    const parsed = G.parseJsonCandidate(response);
+    invalidRaw = parsed.raw;
+    checked = G.validateTopicOrganizer(parsed.value, candidateNames, standards);
+  } catch (error) {
+    if (error?.nonRetryable) throw error;
+    invalidRaw = error?.rawOutput || "";
+    checked = { ok: false, errors: [error?.message || "AI 回傳的內容不是有效 JSON"] };
+  }
+  if (!checked.ok) {
+    await setStage("修復主題建議格式", { model, provider });
+    const repairedResponse = await timedAiRequest(
+      provider,
+      model,
+      G.buildTopicOrganizerRepairRequest(
+        invalidRaw,
+        checked.errors,
+        candidateNames,
+        standards,
+        model,
+        promptOptions
+      ),
+      { apiKey, signal: controller.signal, timeoutMinutes: config.requestTimeoutMinutes }
+    );
+    let repaired;
+    try {
+      repaired = G.parseJsonCandidate(repairedResponse);
+      checked = G.validateTopicOrganizer(repaired.value, candidateNames, standards);
+    } catch (error) {
+      if (error?.nonRetryable) throw error;
+      checked = { ok: false, errors: [error?.message || "修復結果不是有效 JSON"] };
+    }
+    if (!checked.ok) {
+      warnings.push(`模型兩次都未回傳可用格式，本批候選已全部保留未分類：${checked.errors.join("；")}`);
+      checked = G.validateTopicOrganizer({ groups: [], unclassified_topics: candidateNames }, candidateNames, standards);
+    }
+  }
+  warnings.push(...(checked.warnings ?? []));
+  return {
+    groups: checked.value.groups,
+    unclassifiedTopics: checked.value.unclassified_topics,
+    warnings
+  };
+}
+
+/**
+ * Turns validated organizer groups into the local review-card shape (ids,
+ * selectedAliases, impactCount, selected:false). No AI or Notion I/O.
+ */
+function buildOrganizerReviewGroups(groups, candidates) {
+  return groups.map((group, index) => {
+    const aliases = uniqueTopicNames(group.aliases);
+    const evidence = organizerGroupEvidence(candidates, aliases);
+    return {
+      id: `group-${Date.now()}-${index}`,
+      standardTopic: group.standard_topic,
+      definition: group.definition,
+      aliases,
+      selectedAliases: [...aliases],
+      keepSeparate: group.keep_separate,
+      reason: group.reason,
+      confidence: group.confidence,
+      existing: group.existing,
+      confirmed: group.confirmed,
+      impactCount: evidence.impactCount,
+      selected: false
+    };
+  });
+}
+
+/**
+ * Builds a local topic-organizer review session from pages in 待主題整理 /
+ * 待主題確認. Reads Notion (and may update missing data source schema via
+ * readyNotion). Does not write AI 暫定主題 or AI 主題 on article pages.
+ * Candidates already mapped by existing options, page resolutions, or the
+ * confirmed dictionary skip AI and become confirmed groups. Remaining names
+ * go through requestOrganizerGroups. Stores the session in topicOrganizer.
+ */
 async function prepareTopicOrganizer() {
   if (stateCache.running) throw new AppError("目前正在分析文章，請先停止或等候完成", { code: "BUSY" });
   const controller = new AbortController();
@@ -1284,96 +1433,25 @@ async function prepareTopicOrganizer() {
       }));
     const permanentlyDiscarded = candidates.filter(item => item.permanentlyDiscarded && !item.preferredStandard);
     const aiCandidates = candidates.filter(item => !item.preferredStandard && !item.permanentlyDiscarded);
-    const candidateNames = aiCandidates.map(candidate => candidate.name);
     let aiGroups = [];
     let unclassified = permanentlyDiscarded.map(candidate => candidate.name);
     if (aiCandidates.length) {
-      const { apiKey, model, provider } = await activeAiContext(config);
-      const aiInput = aiCandidates.map(candidate => ({ name: candidate.name }));
-      let response;
-      try {
-        response = await timedAiRequest(
-          provider,
-          model,
-          G.buildTopicOrganizerRequest(aiInput, standards, model, organizerPromptOptions),
-          { apiKey, signal: controller.signal, timeoutMinutes: config.requestTimeoutMinutes }
-        );
-      } catch (error) {
-        if (!canRetryTopicOrganizerWithoutSchema(error)) throw error;
-        await setStage("改用相容 JSON 模式", { model, provider });
-        response = await timedAiRequest(
-          provider,
-          model,
-          G.buildTopicOrganizerCompatibilityRequest(aiInput, standards, model, organizerPromptOptions),
-          { apiKey, signal: controller.signal, timeoutMinutes: config.requestTimeoutMinutes }
-        );
-      }
-      await setStage("驗證主題建議", { model, provider });
-      let invalidRaw = "";
-      let checked;
-      try {
-        const parsed = G.parseJsonCandidate(response);
-        invalidRaw = parsed.raw;
-        checked = G.validateTopicOrganizer(parsed.value, candidateNames, standards);
-      } catch (error) {
-        if (error?.nonRetryable) throw error;
-        invalidRaw = error?.rawOutput || "";
-        checked = { ok: false, errors: [error?.message || "AI 回傳的內容不是有效 JSON"] };
-      }
-      if (!checked.ok) {
-        await setStage("修復主題建議格式", { model, provider });
-        const repairedResponse = await timedAiRequest(
-          provider,
-          model,
-          G.buildTopicOrganizerRepairRequest(
-            invalidRaw,
-            checked.errors,
-            candidateNames,
-            standards,
-            model,
-            organizerPromptOptions
-          ),
-          { apiKey, signal: controller.signal, timeoutMinutes: config.requestTimeoutMinutes }
-        );
-        let repaired;
-        try {
-          repaired = G.parseJsonCandidate(repairedResponse);
-          checked = G.validateTopicOrganizer(repaired.value, candidateNames, standards);
-        } catch (error) {
-          if (error?.nonRetryable) throw error;
-          checked = { ok: false, errors: [error?.message || "修復結果不是有效 JSON"] };
-        }
-        if (!checked.ok) {
-          organizerWarnings.push(`模型兩次都未回傳可用格式，本批候選已全部保留未分類：${checked.errors.join("；")}`);
-          checked = G.validateTopicOrganizer({ groups: [], unclassified_topics: candidateNames }, candidateNames, standards);
-        }
-      }
-      aiGroups = checked.value.groups;
-      unclassified = uniqueTopicNames([...unclassified, ...checked.value.unclassified_topics]);
-      organizerWarnings.push(...(checked.warnings ?? []));
+      const requested = await requestOrganizerGroups({
+        aiCandidates,
+        standards,
+        config,
+        controller,
+        promptOptions: organizerPromptOptions
+      });
+      aiGroups = requested.groups;
+      unclassified = uniqueTopicNames([...unclassified, ...requested.unclassifiedTopics]);
+      organizerWarnings.push(...requested.warnings);
     }
     const groups = mergeOrganizerGroups([...confirmedGroups, ...aiGroups]);
     const groupedKeys = new Set(groups.flatMap(group => group.aliases).map(N.topicKey));
     unclassified = uniqueTopicNames(unclassified)
       .filter(name => !groupedKeys.has(N.topicKey(name)));
-    const reviewGroups = groups.map((group, index) => {
-      const aliases = uniqueTopicNames(group.aliases);
-      const evidence = organizerGroupEvidence(candidates, aliases);
-      return {
-        id: `group-${Date.now()}-${index}`,
-        standardTopic: group.standard_topic,
-        definition: group.definition,
-        aliases,
-        selectedAliases: [...aliases],
-        keepSeparate: group.keep_separate,
-        reason: group.reason,
-        confidence: group.confidence,
-        existing: group.existing,
-        confirmed: group.confirmed,
-        impactCount: evidence.impactCount,
-        selected: false
-      };
-    });
+    const reviewGroups = buildOrganizerReviewGroups(groups, candidates);
     stateCache.topicOrganizer = {
       version: TOPIC_ORGANIZER_CACHE_VERSION,
       status: "review",
@@ -1399,6 +1477,12 @@ async function prepareTopicOrganizer() {
   }
 }
 
+// ==== Topic organizer session and drafts ====
+/**
+ * Projects topicOrganizer (and canRollback from topicRollback) for the
+ * options UI. Local only: no AI or Notion I/O. Omits applied/skipped groups
+ * and skipped unclassified names from the active lists.
+ */
 function topicOrganizerForUi() {
   const organizer = stateCache.topicOrganizer;
   if (!organizer) {
@@ -1451,6 +1535,10 @@ function topicOrganizerForUi() {
   };
 }
 
+/**
+ * Drops the local organizer review session. Does not write Notion, call AI,
+ * or clear topicRollback.
+ */
 async function clearTopicOrganizer() {
   if (stateCache.running) throw new AppError("目前正在處理其他工作，請稍後再清除建議", { code: "BUSY" });
   stateCache.topicOrganizer = null;
@@ -1458,6 +1546,11 @@ async function clearTopicOrganizer() {
   return topicOrganizerForUi();
 }
 
+/**
+ * Copies checkbox, standard-topic, and selected-alias drafts from the UI
+ * into the in-memory organizer groups. Local review state only; does not
+ * persist unless the caller does, and does not write Notion.
+ */
 function saveTopicOrganizerDrafts(organizer, groupsInput = []) {
   const storedGroups = new Map((organizer?.groups ?? []).map(group => [group.id, group]));
   for (const draft of groupsInput ?? []) {
@@ -1473,6 +1566,10 @@ function saveTopicOrganizerDrafts(organizer, groupsInput = []) {
   }
 }
 
+/**
+ * Marks one organizer group skipped, moves its aliases into unclassified,
+ * and persists local review state. Does not call AI or write article pages.
+ */
 async function skipTopicOrganizerGroup(groupId, groupsInput = []) {
   const organizer = stateCache.topicOrganizer;
   saveTopicOrganizerDrafts(organizer, groupsInput);
@@ -1486,6 +1583,7 @@ async function skipTopicOrganizerGroup(groupId, groupsInput = []) {
   return topicOrganizerForUi();
 }
 
+// ==== Topic organizer application ====
 function mergeDictionaryEntries(existing, additions) {
   const map = new Map(normalizeTopicDictionary(existing).map(item => [N.topicKey(item.name), item]));
   for (const addition of normalizeTopicDictionary(additions)) {
@@ -1500,6 +1598,15 @@ function mergeDictionaryEntries(existing, additions) {
   return [...map.values()];
 }
 
+/**
+ * Applies selected organizer groups: maps AI 暫定主題 aliases to confirmed
+ * AI 主題 on affected pages. Does not call AI. May PATCH the data source to
+ * add new topic options, then writes pages incrementally. Remaining unmatched
+ * provisionals stay as AI 暫定主題; status becomes 已分析 only when none remain
+ * on that page, otherwise 待主題確認. Persists progress after each successful
+ * page and retains an incomplete snapshot on interruption or failure. A later
+ * apply with the same operationKey resumes from that snapshot.
+ */
 async function applyTopicOrganizerGroups(groupsInput = []) {
   const organizer = stateCache.topicOrganizer;
   if (!organizer?.pages || stateCache.running) {
@@ -1684,6 +1791,13 @@ async function applyTopicOrganizerGroups(groupsInput = []) {
   return topicOrganizerForUi();
 }
 
+/**
+ * Resolves one unclassified AI 暫定主題 from the organizer session. skip is
+ * local-only. approve/replace/custom/discard write affected pages like apply
+ * (one candidate, incremental rollback snapshots) but do not use group
+ * cards: discard adds the name to discardedTopicNames instead of AI 主題.
+ * Does not call AI. readyNotion may update missing schema.
+ */
 async function resolveOrganizerUnclassified(candidateName, action, replacementTopic = "", customTopic = "") {
   const organizer = stateCache.topicOrganizer;
   if (!organizer?.pages || stateCache.running) {
@@ -1833,6 +1947,18 @@ async function resolveOrganizerUnclassified(candidateName, action, replacementTo
   return topicOrganizerForUi();
 }
 
+// ==== Topic organizer rollback ====
+/**
+ * Reverts the last organizer apply or manual unclassified write. Reads each
+ * snapshotted page and writes only when needed. Removes only topics recorded
+ * in addedTopics; restores 整理狀態 only if it still equals statusAfter;
+ * restores AI 暫定主題 only when the current value still matches
+ * provisionalAfter. These guards skip those fields when they have changed,
+ * but do not preserve every later edit. The topic dictionary and discarded-name
+ * list are restored from the snapshot. When an organizer session still exists,
+ * its saved group drafts, unclassified and manual-skipped state, and
+ * applied-candidate count are also restored. Does not call AI.
+ */
 async function rollbackTopicOrganizer() {
   if (stateCache.running) throw new AppError("請先停止目前的主題套用", { code: "BUSY" });
   const snapshot = stateCache.topicRollback;
@@ -1886,6 +2012,7 @@ async function rollbackTopicOrganizer() {
   return topicOrganizerForUi();
 }
 
+// ==== Topic dictionary import and export ====
 function dictionaryExport(config) {
   return {
     format: "notion-ai-analyzer-topic-dictionary",
@@ -1926,6 +2053,19 @@ function previewDictionaryImport(value, config) {
   };
 }
 
+// ==== Pending-page scanning ====
+/**
+ * Discovers Notion pages in 待分析 and 分析失敗 so the UI and batch queue
+ * know what work exists. Used by the explicit scan flow, and by queueAll when
+ * no fresh pending-scan cache is available. May update missing data source
+ * schema through readyNotion; queries pending and failed pages. Does not call
+ * AI or write analysis properties to article pages. Updates failed, recent,
+ * knownPending, lastScanAt, pendingScan, databaseCheck, lastError, and stage.
+ * Only a paused batch that already has queued work has its queue replaced;
+ * otherwise the queue is cleared when nothing is in flight. Refuses to run
+ * while an unpaused batch is actively processing. Status queries are bounded
+ * by a 90s cancellation timeout.
+ */
 async function scanPending() {
   if (stateCache.mode === "batch" && !stateCache.paused
     && Boolean(stateCache.running || stateCache.current || stateCache.queue.length)) {
@@ -2012,6 +2152,7 @@ async function scanPending() {
   return pages;
 }
 
+// ==== Analysis pipeline ====
 async function readPageRecords(pageId, token, signal) {
   const records = [];
   let blockCount = 0;
@@ -2043,6 +2184,14 @@ async function readPageRecords(pageId, token, signal) {
   return records;
 }
 
+/**
+ * Asks the configured AI provider for a structured article analysis and
+ * validates the JSON. One repair request is sent if the first payload is
+ * fixable. Does not read or write Notion. Validation updates the processing stage
+ * through setStage; this function does not own queue mutation. AbortError and
+ * AppError propagate to processItem, which owns pause, requeue, and failure
+ * recording. Used for both direct articles and the final merge of chunk notes.
+ */
 async function generateAndValidate(
   sourcePrompt,
   provider,
@@ -2135,6 +2284,13 @@ async function generateAndValidate(
   return checkedRepair.value;
 }
 
+/**
+ * Summarizes one chunk of a long article into notes for a later
+ * generateAndValidate merge. Calls the AI provider (initial attempt plus one
+ * repair). No Notion I/O. Validation updates the processing stage through
+ * setStage; this function does not own queue mutation. Invoked only from
+ * analyzeArticle when the article exceeds the provider's direct-text limit.
+ */
 async function extractChunkNote(chunk, index, total, provider, model, apiKey, signal, requestTimeoutMinutes) {
   let payload = G.buildChunkRequest(chunk, index, total, model);
   let lastError = null;
@@ -2174,6 +2330,13 @@ async function extractChunkNote(chunk, index, total, provider, model, apiKey, si
   });
 }
 
+/**
+ * Turns page plain text into validated title, keywords, summary, and
+ * provisional topics (AI 暫定主題). Sits between page read and Notion write
+ * inside processItem. Calls the AI provider; does not touch Notion or the
+ * queue. Short articles use generateAndValidate once. Longer ones extract
+ * per-chunk notes first, then run generateAndValidate on those notes.
+ */
 async function analyzeArticle(articleText, config, signal) {
   const { apiKey, model, provider } = await activeAiContext(config);
   const excludedPersonTerms = normalizeExcludedPersonTerms(config.excludedPersonTerms);
@@ -2230,6 +2393,7 @@ async function analyzeArticle(articleText, config, signal) {
   );
 }
 
+// ==== Queue state and UI-facing responses ====
 function uniqueItems(items) {
   const seen = new Set();
   return (items ?? []).filter(item => {
@@ -2303,6 +2467,12 @@ function publicStatus() {
   };
 }
 
+// ==== Queue processing ====
+/**
+ * Wakes the service worker so processOne can drain the local queue. Uses both
+ * chrome.alarms and a short setTimeout in case the worker sleeps. Does not
+ * call AI or Notion; processOne still decides whether an item may run.
+ */
 function scheduleProcessing(delay = 200) {
   chrome.alarms.create(PROCESS_ALARM, { when: Date.now() + Math.max(50, delay) });
   setTimeout(() => { void processOne(); }, Math.max(25, Math.min(delay, 500)));
@@ -2326,6 +2496,62 @@ async function resetPageToPending(item, token) {
   }
 }
 
+async function requeueAndPause(item, message, token, { resetPage } = {}) {
+  stateCache.queue = uniqueItems([item, ...stateCache.queue]);
+  stateCache.paused = true;
+  stateCache.lastError = message;
+  if (resetPage) await resetPageToPending(item, token);
+}
+
+async function recordFailure(item, error, token) {
+  let statusError = "";
+  if (token) {
+    try {
+      await notionRequest(`/v1/pages/${item.id}`, {
+        method: "PATCH",
+        body: N.statusUpdatePayload(N.STATUS.failed),
+        retrySafe: true,
+        token
+      });
+    } catch (failureStatusError) {
+      statusError = `；且無法寫入分析失敗狀態：${failureStatusError.message}`;
+    }
+  } else {
+    statusError = "；且目前沒有 Notion Token，無法寫入分析失敗狀態";
+  }
+  const failure = {
+    ...item,
+    code: error.code || "APP_ERROR",
+    diagnostic: error.diagnostic || null,
+    error: `${S.truncateMessage(error.message || "未知錯誤")}${statusError}`,
+    failedAt: new Date().toISOString()
+  };
+  stateCache.failed = [failure, ...stateCache.failed.filter(entry => entry.id !== item.id)].slice(0, MAX_RECENT);
+  stateCache.recent = [{ ...failure, outcome: "failed" }, ...stateCache.recent.filter(entry => entry.id !== item.id)].slice(0, MAX_RECENT);
+  stateCache.lastError = failure.error;
+  decrementKnownPending(item);
+}
+
+/**
+ * Runs the per-page pipeline for one queued item: mark 分析中, read blocks,
+ * call AI, write the analysis draft, then record success or classify the error.
+ *
+ * Writes AI 標題, AI 關鍵字, AI 摘要, and AI 暫定主題. The batch path sets
+ * 整理狀態 to 待主題整理 and leaves confirmed AI 主題 unchanged so the topic
+ * organizer can apply taxonomy later. Single-page review (popup reanalysis)
+ * writes 待主題確認, clears confirmed AI 主題, and opens topicReview: reanalysis
+ * must invalidate previous final topics rather than leave stale confirmed
+ * values beside new provisionals.
+ *
+ * Mutates current, running, lastError, stage, and (on the single path)
+ * topicReview and paused; failed/recent/queue are updated through helpers.
+ * stopRequested is checked after the 分析中 write, after the page read, and
+ * after AI so a stop already requested at those boundaries is handled before
+ * the next processing phase. The abort path requeues the item and attempts to
+ * restore its Notion status to 待分析. Timeout, rate-limit, and setup errors
+ * also requeue and pause; other errors record 分析失敗. A queue/database
+ * mismatch drops the local queue without writing pages.
+ */
 async function processItem(item) {
   let token = "";
   const controller = new AbortController();
@@ -2428,10 +2654,7 @@ async function processItem(item) {
     decrementKnownPending(item);
   } catch (error) {
     if (isAbort(error) || stateCache.stopRequested) {
-      stateCache.queue = uniqueItems([item, ...stateCache.queue]);
-      stateCache.paused = true;
-      stateCache.lastError = "已停止；目前文章已放回待分析佇列。";
-      await resetPageToPending(item, token);
+      await requeueAndPause(item, "已停止；目前文章已放回待分析佇列。", token, { resetPage: true });
     } else if (error.code === "QUEUE_SOURCE_MISMATCH") {
       stateCache.queue = [];
       stateCache.failed = [];
@@ -2440,79 +2663,37 @@ async function processItem(item) {
       stateCache.paused = true;
       stateCache.mode = "paused";
       stateCache.lastError = "已攔截先前資料庫留下的本機佇列，沒有寫入任何頁面。請按「掃描資料庫」後再開始分析。";
-    } else if (["AI_TIMEOUT", "PAGE_READ_TIMEOUT", "NOTION_WRITE_TIMEOUT"].includes(error.code)) {
-      stateCache.queue = uniqueItems([item, ...stateCache.queue]);
-      stateCache.paused = true;
-      stateCache.lastError = `${S.truncateMessage(error.message)}。文章已放回待分析；請自行決定重試或更換模型。`;
-      await resetPageToPending(item, token);
-    } else if ([
-      "GEMINI_RATE_LIMIT",
-      "VERTEX_RATE_LIMIT",
-      "OPENROUTER_RATE_LIMIT",
-      "NOTION_RATE_LIMIT"
-    ].includes(error.code)) {
-      stateCache.queue = uniqueItems([item, ...stateCache.queue]);
-      stateCache.paused = true;
+    } else if (REQUEUE_TIMEOUT_CODES.has(error.code)) {
+      await requeueAndPause(
+        item,
+        `${S.truncateMessage(error.message)}。文章已放回待分析；請自行決定重試或更換模型。`,
+        token,
+        { resetPage: true }
+      );
+    } else if (RATE_LIMIT_CODES.has(error.code)) {
       const wait = error.retryAfter ? `，建議 ${error.retryAfter} 秒後再繼續` : "，請稍後再繼續";
-      stateCache.lastError = `API 已達速率或額度限制${wait}：${S.truncateMessage(error.message)}`;
-      await resetPageToPending(item, token);
-    } else if ([
-      "GEMINI_AUTH",
-      "GEMINI_KEY_MISSING",
-      "VERTEX_AUTH",
-      "VERTEX_KEY_MISSING",
-      "OPENROUTER_AUTH",
-      "OPENROUTER_KEY_MISSING",
-      "OPENROUTER_PAID_CONFIRMATION_REQUIRED",
-      "MODEL_INVALID",
-      "MODEL_NOT_FOUND",
-      "SCHEMA_INVALID",
-      "NOTION_FIELDS_INVALID",
-      "NOTION_STATUS_FIELD_MISSING",
-      "NOTION_STATUS_FIELD_TYPE",
-      "NOTION_PENDING_OPTION_MISSING",
-      "NOTION_AUTH",
-      "NOTION_TOKEN_MISSING",
-      "TOPIC_OPTIONS_EMPTY"
-    ].includes(error.code)) {
-      stateCache.queue = uniqueItems([item, ...stateCache.queue]);
-      stateCache.paused = true;
-      stateCache.lastError = `設定或授權需要修正，佇列已暫停：${S.truncateMessage(error.message)}`;
-      if (!["NOTION_AUTH", "NOTION_TOKEN_MISSING"].includes(error.code)) {
-        await resetPageToPending(item, token);
-      }
+      await requeueAndPause(
+        item,
+        `API 已達速率或額度限制${wait}：${S.truncateMessage(error.message)}`,
+        token,
+        { resetPage: true }
+      );
+    } else if (SETUP_ERROR_CODES.has(error.code)) {
+      await requeueAndPause(
+        item,
+        `設定或授權需要修正，佇列已暫停：${S.truncateMessage(error.message)}`,
+        token,
+        { resetPage: !["NOTION_AUTH", "NOTION_TOKEN_MISSING"].includes(error.code) }
+      );
     } else if (error.code === "OPENROUTER_MODEL_INCOMPATIBLE") {
-      stateCache.queue = uniqueItems([item, ...stateCache.queue]);
-      stateCache.paused = true;
-      stateCache.lastError = `OpenRouter 模型不相容，佇列已暫停：${S.truncateMessage(error.message)}`;
-      await resetPageToPending(item, token);
+      await requeueAndPause(
+        item,
+        `OpenRouter 模型不相容，佇列已暫停：${S.truncateMessage(error.message)}`,
+        token,
+        { resetPage: true }
+      );
     } else {
-      let statusError = "";
-      if (token) {
-        try {
-          await notionRequest(`/v1/pages/${item.id}`, {
-            method: "PATCH",
-            body: N.statusUpdatePayload(N.STATUS.failed),
-            retrySafe: true,
-            token
-          });
-        } catch (failureStatusError) {
-          statusError = `；且無法寫入分析失敗狀態：${failureStatusError.message}`;
-        }
-      } else {
-        statusError = "；且目前沒有 Notion Token，無法寫入分析失敗狀態";
-      }
-      const failure = {
-        ...item,
-        code: error.code || "APP_ERROR",
-        diagnostic: error.diagnostic || null,
-        error: `${S.truncateMessage(error.message || "未知錯誤")}${statusError}`,
-        failedAt: new Date().toISOString()
-      };
-      stateCache.failed = [failure, ...stateCache.failed.filter(entry => entry.id !== item.id)].slice(0, MAX_RECENT);
-      stateCache.recent = [{ ...failure, outcome: "failed" }, ...stateCache.recent.filter(entry => entry.id !== item.id)].slice(0, MAX_RECENT);
-      stateCache.lastError = failure.error;
-      decrementKnownPending(item);
+      await recordFailure(item, error, token);
     }
   } finally {
     if (activeAbortController === controller) activeAbortController = null;
@@ -2526,6 +2707,12 @@ async function processItem(item) {
   }
 }
 
+/**
+ * Serial worker that takes at most one queue item. Skips when paused, already
+ * running, empty, or waiting on topicReview. After processItem, schedules the
+ * next item unless paused. An unexpected throw requeues that item and pauses
+ * so the rest of the batch does not continue blindly.
+ */
 async function processOne() {
   await initialize();
   if (processingPromise) return processingPromise;
@@ -2550,12 +2737,23 @@ async function processOne() {
   return processingPromise;
 }
 
-async function saveSettings(settings) {
-  const current = await readConfig();
+// ==== Settings persistence ====
+/**
+ * Settings-save target string. Trims the submitted or current notionTarget.
+ * A non-empty value must contain a UUID (database URL, database id, or data
+ * source id); otherwise NOTION_TARGET_INVALID. Empty is allowed and does
+ * not call Notion. Compact UUID comparison for a database change happens in
+ * saveSettings, not here.
+ */
+function resolveNotionTarget(settings, current) {
   const notionTarget = String(settings.notionTarget ?? current.notionTarget).trim();
   if (notionTarget && !S.extractNotionId(notionTarget)) {
     throw new AppError("Notion 資料庫網址或 Data Source ID 格式不正確", { code: "NOTION_TARGET_INVALID" });
   }
+  return notionTarget;
+}
+
+function resolveProviderSelection(settings, current) {
   const aiProvider = normalizeAiProvider(settings.aiProvider ?? current.aiProvider);
   const geminiModel = S.normalizeModelName(settings.geminiModel ?? current.geminiModel) || G.DEFAULT_MODEL;
   const openRouterModel = String(settings.openRouterModel ?? current.openRouterModel ?? "openrouter/free").trim();
@@ -2576,6 +2774,17 @@ async function saveSettings(settings) {
     });
   }
   const vertexModel = S.normalizeModelName(settings.vertexModel ?? current.vertexModel) || "gemini-3.5-flash-lite";
+  return {
+    aiProvider,
+    geminiModel,
+    knownFreeOpenRouterModels,
+    openRouterModel,
+    openRouterModelIsFree,
+    vertexModel
+  };
+}
+
+function resolvePromptSettings(settings, current) {
   const outputSpec = P.normalizeOutputSpec(settings.outputSpec ?? current.outputSpec);
   const analysisPrompt = settings.analysisPrompt === undefined
     ? S.cleanText(current.analysisPrompt)
@@ -2585,9 +2794,10 @@ async function saveSettings(settings) {
     : Boolean(settings.analysisPromptCustomized) && Boolean(analysisPrompt);
   const timeoutValue = Number(settings.requestTimeoutMinutes ?? current.requestTimeoutMinutes);
   const requestTimeoutMinutes = [0, 3, 5, 10].includes(timeoutValue) ? timeoutValue : 5;
-  const currentTargetId = compactNotionId(S.extractNotionId(current.notionTarget || current.dataSourceId));
-  const nextTargetId = compactNotionId(S.extractNotionId(notionTarget));
-  const targetChanged = nextTargetId !== currentTargetId;
+  return { analysisPrompt, analysisPromptCustomized, outputSpec, requestTimeoutMinutes };
+}
+
+function resolveTopicPreferences(settings, current, targetChanged, nextTargetId) {
   const preferExistingTopicsByDataSource = normalizeTopicOrganizerPreferences(
     current.preferExistingTopicsByDataSource
   );
@@ -2601,6 +2811,16 @@ async function saveSettings(settings) {
   if (!targetChanged && current.dataSourceId) {
     preferExistingTopicsByDataSource[compactNotionId(current.dataSourceId)] = preferExistingTopics;
   }
+  return { preferExistingTopics, preferExistingTopicsByDataSource };
+}
+
+/**
+ * Blocks a Notion-target UUID change while a single-page topicReview is open
+ * (TOPIC_REVIEW_PENDING) or while analysis has running/current
+ * (DATABASE_CHANGE_WHILE_RUNNING). Does not mutate state. Must pass before
+ * secrets or config are written.
+ */
+function assertDatabaseChangeAllowed(targetChanged) {
   if (targetChanged && stateCache?.topicReview) {
     throw new AppError("目前有一篇文章等待確認新主題，請先完成確認再更換 Notion 資料庫", {
       code: "TOPIC_REVIEW_PENDING"
@@ -2611,28 +2831,32 @@ async function saveSettings(settings) {
       code: "DATABASE_CHANGE_WHILE_RUNNING"
     });
   }
+}
+
+function buildNextConfig(settings, current, resolved) {
+  const { notionTarget, preferExistingTopicsByDataSource, promptSettings, provider, targetChanged } = resolved;
   const next = {
     ...current,
     allowTopicProposals: true,
     excludedPersonTerms: settings.excludedPersonTerms === undefined
       ? normalizeExcludedPersonTerms(current.excludedPersonTerms)
       : normalizeExcludedPersonTerms(settings.excludedPersonTerms),
-    analysisPrompt,
-    analysisPromptCustomized,
+    analysisPrompt: promptSettings.analysisPrompt,
+    analysisPromptCustomized: promptSettings.analysisPromptCustomized,
     promptBaseVersion: CURRENT_PROMPT_VERSION,
-    aiProvider,
+    aiProvider: provider.aiProvider,
     notionTarget,
-    geminiModel,
-    openRouterModel,
-    openRouterFreeModelIds: [...knownFreeOpenRouterModels].slice(0, 500),
-    openRouterPaidConfirmedModel: openRouterModelIsFree ? "" : openRouterModel,
-    vertexModel,
+    geminiModel: provider.geminiModel,
+    openRouterModel: provider.openRouterModel,
+    openRouterFreeModelIds: [...provider.knownFreeOpenRouterModels].slice(0, 500),
+    openRouterPaidConfirmedModel: provider.openRouterModelIsFree ? "" : provider.openRouterModel,
+    vertexModel: provider.vertexModel,
     rememberGeminiKey: Boolean(settings.rememberGeminiKey),
     rememberOpenRouterKey: Boolean(settings.rememberOpenRouterKey),
     rememberVertexKey: Boolean(settings.rememberVertexKey),
     rememberNotionToken: Boolean(settings.rememberNotionToken),
-    requestTimeoutMinutes,
-    outputSpec,
+    requestTimeoutMinutes: promptSettings.requestTimeoutMinutes,
+    outputSpec: promptSettings.outputSpec,
     preferExistingTopicsByDataSource,
     topicAliases: targetChanged ? {} : normalizeTopicAliases(current.topicAliases),
     topicPageResolutions: targetChanged ? {} : normalizeTopicPageResolutions(current.topicPageResolutions),
@@ -2642,34 +2866,45 @@ async function saveSettings(settings) {
     databaseId: targetChanged ? "" : current.databaseId
   };
   delete next.autoSelectHighConfidence;
-  const [hasNotionToken, hasGeminiKey, hasVertexKey, hasOpenRouterKey] = await Promise.all([
-    storeSecret(NOTION_TOKEN_KEY, settings.notionToken, next.rememberNotionToken),
-    storeSecret(GEMINI_KEY_KEY, settings.geminiKey, next.rememberGeminiKey),
-    storeSecret(VERTEX_KEY_KEY, settings.vertexKey, next.rememberVertexKey),
-    storeSecret(OPENROUTER_KEY_KEY, settings.openRouterKey, next.rememberOpenRouterKey)
-  ]);
-  await writeConfig(next);
-  let clearedQueueCount = 0;
-  if (targetChanged && stateCache) {
-    clearedQueueCount = stateCache.queue.length;
-    preparedDataSourceId = "";
-    stateCache.databaseCheck = null;
-    stateCache.queue = [];
-    stateCache.failed = [];
-    stateCache.recent = [];
-    stateCache.knownPending = null;
-    stateCache.pendingScan = null;
-    stateCache.lastScanAt = "";
-    stateCache.lastError = "";
-    stateCache.mode = "idle";
-    stateCache.paused = true;
-    stateCache.running = false;
-    stateCache.stopRequested = false;
-    stateCache.stage = null;
-    stateCache.topicOrganizer = null;
-    stateCache.topicRollback = null;
-    await persistState();
-  }
+  return next;
+}
+
+/**
+ * After a saved target UUID change, drops work bound to the previous
+ * database: queue, failed, recent, pending scan, organizer, rollback,
+ * databaseCheck, and in-flight flags. Topic-resolution config (dictionary,
+ * aliases, page resolutions, discardedTopicNames, stored ids) is cleared
+ * on the next config object by saveSettings, not here. Does not clear
+ * topicReview; a change is refused while a review is open. persistState
+ * before returning the previous queue length.
+ */
+async function resetStateForDatabaseChange() {
+  if (!stateCache) return 0;
+  const clearedQueueCount = stateCache.queue.length;
+  preparedDataSourceId = "";
+  stateCache.databaseCheck = null;
+  stateCache.queue = [];
+  stateCache.failed = [];
+  stateCache.recent = [];
+  stateCache.knownPending = null;
+  stateCache.pendingScan = null;
+  stateCache.lastScanAt = "";
+  stateCache.lastError = "";
+  stateCache.mode = "idle";
+  stateCache.paused = true;
+  stateCache.running = false;
+  stateCache.stopRequested = false;
+  stateCache.stage = null;
+  stateCache.topicOrganizer = null;
+  stateCache.topicRollback = null;
+  await persistState();
+  return clearedQueueCount;
+}
+
+function buildSaveResponse(next, resolved) {
+  const { clearedQueueCount, preferExistingTopics, provider, secrets, targetChanged } = resolved;
+  const { aiProvider, geminiModel, openRouterModel, openRouterModelIsFree, vertexModel } = provider;
+  const { hasGeminiKey, hasNotionToken, hasOpenRouterKey, hasVertexKey } = secrets;
   return {
     ...next,
     preferExistingTopics,
@@ -2685,6 +2920,67 @@ async function saveSettings(settings) {
   };
 }
 
+/**
+ * Persists options-page settings. Guard order: parse notionTarget, provider
+ * and model (MODEL_INVALID, OPENROUTER_PAID_CONFIRMATION_REQUIRED), prompt
+ * and timeout, then assertDatabaseChangeAllowed. All of those must pass
+ * before storeSecret or writeConfig. A compact-UUID change versus the current
+ * notionTarget or dataSourceId is a database change: the next config clears
+ * dataSourceId, databaseId, topicAliases, topicPageResolutions,
+ * discardedTopicNames, and topicDictionary so another database cannot reuse
+ * that taxonomy or queue; then resetStateForDatabaseChange. Topic
+ * preferences stay keyed per data source / target UUID and are not wiped.
+ * Does not call Notion or ensureSchema; schema is checked later by
+ * readyNotion. Response includes has*Key booleans, not secret values.
+ */
+async function saveSettings(settings) {
+  const current = await readConfig();
+  const notionTarget = resolveNotionTarget(settings, current);
+  const provider = resolveProviderSelection(settings, current);
+  const promptSettings = resolvePromptSettings(settings, current);
+  const currentTargetId = compactNotionId(S.extractNotionId(current.notionTarget || current.dataSourceId));
+  const nextTargetId = compactNotionId(S.extractNotionId(notionTarget));
+  const targetChanged = nextTargetId !== currentTargetId;
+  const { preferExistingTopics, preferExistingTopicsByDataSource } = resolveTopicPreferences(
+    settings,
+    current,
+    targetChanged,
+    nextTargetId
+  );
+  assertDatabaseChangeAllowed(targetChanged);
+  const next = buildNextConfig(settings, current, {
+    notionTarget,
+    preferExistingTopicsByDataSource,
+    promptSettings,
+    provider,
+    targetChanged
+  });
+  const [hasNotionToken, hasGeminiKey, hasVertexKey, hasOpenRouterKey] = await Promise.all([
+    storeSecret(NOTION_TOKEN_KEY, settings.notionToken, next.rememberNotionToken),
+    storeSecret(GEMINI_KEY_KEY, settings.geminiKey, next.rememberGeminiKey),
+    storeSecret(VERTEX_KEY_KEY, settings.vertexKey, next.rememberVertexKey),
+    storeSecret(OPENROUTER_KEY_KEY, settings.openRouterKey, next.rememberOpenRouterKey)
+  ]);
+  await writeConfig(next);
+  const clearedQueueCount = targetChanged ? await resetStateForDatabaseChange() : 0;
+  return buildSaveResponse(next, {
+    clearedQueueCount,
+    preferExistingTopics,
+    provider,
+    secrets: { hasGeminiKey, hasNotionToken, hasOpenRouterKey, hasVertexKey },
+    targetChanged
+  });
+}
+
+// ==== Settings UI and connection diagnostics ====
+/**
+ * Options/popup config payload. Reads stored config and whether secrets exist.
+ * Does not return Notion token or AI key values; exposes hasNotionToken and
+ * has*Key booleans. Spreads ids, models, prompt flags, topic dictionary,
+ * discardedTopicNames, and preferExistingTopicsByDataSource, and adds
+ * preferExistingTopics for the current data source, prompt preview, and
+ * default-prompt drift. Does not call Notion or AI.
+ */
 async function getConfigForUi() {
   const config = await readConfig();
   const [notionToken, geminiKey, vertexKey, openRouterKey] = await Promise.all([
@@ -2719,6 +3015,15 @@ async function getConfigForUi() {
   };
 }
 
+/**
+ * Options connection test. Goes through readyNotion, so it may PATCH missing
+ * data-source schema and persist resolved ids; not read-only. Then contacts
+ * only the configured AI provider: Vertex countTokens on the selected model,
+ * OpenRouter model list (also writeConfig of openRouterFreeModelIds), or
+ * Gemini model list. Queries whether any 待分析 page exists. No article
+ * property writes. Missing pending pages set databaseCheck NO_PENDING_PAGES
+ * with ready true and do not throw. Returns plan.added / plan.updated names.
+ */
 async function testConnections() {
   const { config, dataSource, plan, token } = await readyNotion();
   const provider = normalizeAiProvider(config.aiProvider);
@@ -2763,6 +3068,7 @@ async function testConnections() {
   };
 }
 
+// ==== Topic-review helpers ====
 function ensureNoTopicReview() {
   if (stateCache.topicReview) {
     throw new AppError("目前有一篇文章等待確認新主題，請先完成確認", {
@@ -2781,6 +3087,17 @@ function uniqueTopicNames(values) {
   });
 }
 
+// ==== Single-page topic review resolution ====
+/**
+ * Resolves the next single-page AI 暫定主題 candidate. No AI.
+ * approve/replace/custom immediately PATCH that page: drop the candidate from
+ * AI 暫定主題 and add the chosen name to AI 主題; 整理狀態 becomes 已分析 only
+ * when that write leaves no remaining provisionals, otherwise 待主題確認.
+ * skip is local-only (temporarily_skipped) and does not write Notion.
+ * discard removes the candidate from AI 暫定主題 without adding AI 主題, and
+ * records it in discardedTopicNames. Local topicReview stays until
+ * remainingCandidates is empty.
+ */
 async function resolveTopicReview(action, replacementTopic = "", customTopic = "", rememberMapping = true) {
   if (stateCache.running) throw new AppError("目前仍在處理文章，請稍後再試", { code: "BUSY" });
   const review = normalizeTopicReview(stateCache.topicReview);
@@ -2825,9 +3142,11 @@ async function resolveTopicReview(action, replacementTopic = "", customTopic = "
     const existingCustom = byKey.get(N.topicKey(custom));
     selectedTopic = existingCustom || custom;
     topicDecision = existingCustom ? "custom_existing" : "custom_new";
-  } else if (action === "skip" || action === "discard") {
+  } else if (action === "skip") {
     review.skippedCandidates.push(candidate);
     topicDecision = "temporarily_skipped";
+  } else if (action === "discard") {
+    topicDecision = "discarded";
   } else {
     throw new AppError("未知的新主題確認操作", { code: "TOPIC_REVIEW_ACTION_INVALID" });
   }
@@ -2855,14 +3174,16 @@ async function resolveTopicReview(action, replacementTopic = "", customTopic = "
   review.decisions.push(decision);
   review.remainingCandidates = review.remainingCandidates.slice(1);
 
-  if (selectedTopic) {
+  if (selectedTopic || action === "discard") {
     const currentPage = await notionRequest(`/v1/pages/${review.item.id}`, { token });
     const currentValues = N.pagePropertyValues(currentPage);
     const candidateKey = N.topicKey(candidate);
     const unresolvedTopics = uniqueTopicNames(
       currentValues.provisionalTopics.filter(name => N.topicKey(name) !== candidateKey)
     );
-    const finalTopics = uniqueTopicNames([...(currentValues.aiTopics ?? []), selectedTopic]);
+    const finalTopics = selectedTopic
+      ? uniqueTopicNames([...(currentValues.aiTopics ?? []), selectedTopic])
+      : uniqueTopicNames(currentValues.aiTopics ?? []);
     const status = unresolvedTopics.length ? N.STATUS.topicReview : N.STATUS.analyzed;
     await notionRequest(`/v1/pages/${review.item.id}`, {
       method: "PATCH",
@@ -2871,7 +3192,12 @@ async function resolveTopicReview(action, replacementTopic = "", customTopic = "
       token
     });
 
-    if (decision.rememberMapping) {
+    if (action === "discard") {
+      config.discardedTopicNames = normalizeDiscardedTopicNames([
+        ...(config.discardedTopicNames ?? []),
+        candidate
+      ]);
+    } else if (decision.rememberMapping) {
       config.topicDictionary = mergeDictionaryEntries(config.topicDictionary, [{
         name: selectedTopic,
         definition: "由單篇主題確認流程建立的主題對照。",
@@ -2911,6 +3237,15 @@ async function resolveTopicReview(action, replacementTopic = "", customTopic = "
   return publicStatus();
 }
 
+// ==== Queue commands ====
+/**
+ * User command to start a batch: reuses a pending scan no more than two
+ * minutes old, or calls scanPending. Notion readiness may update missing data
+ * source schema. Does not call AI or write analysis results to article pages.
+ * Blocked while a single-page topic review is open. When pages exist, enters
+ * batch mode, unpauses, stores knownPending, and schedules processOne. When
+ * no pages exist, returns idle and paused with the no-pending result.
+ */
 async function queueAll() {
   ensureNoTopicReview();
   const config = await readConfig();
@@ -2954,6 +3289,12 @@ async function queueAll() {
   return publicStatus();
 }
 
+/**
+ * User command to pause the batch. Sets paused and mode paused. For an
+ * in-flight item, sets stopRequested and aborts the active controller; the
+ * processItem abort path then requeues the item and attempts to restore 待分析.
+ * Does not itself guarantee that a draft write already in progress is skipped.
+ */
 async function stopAnalysis() {
   stateCache.paused = true;
   stateCache.stopRequested = Boolean(stateCache.current);
@@ -2963,6 +3304,11 @@ async function stopAnalysis() {
   return publicStatus();
 }
 
+/**
+ * User command to continue a paused batch. Blocked while topicReview is open.
+ * Clears pause, sets mode to batch, and schedules processOne when the queue
+ * still has items. Does not call AI or Notion.
+ */
 async function resumeAnalysis() {
   ensureNoTopicReview();
   stateCache.paused = false;
@@ -2973,6 +3319,13 @@ async function resumeAnalysis() {
   return publicStatus();
 }
 
+/**
+ * Rebuilds the queue from Notion pages marked 分析失敗 plus the local failed
+ * list, then starts a batch. readyNotion may update missing data source schema.
+ * Does not write analysis results to article pages or call AI until queued
+ * work reaches processItem. Blocked while topicReview is open. Clears the
+ * local failed list once those items are queued.
+ */
 async function retryFailed() {
   ensureNoTopicReview();
   const { config, token } = await readyNotion();
@@ -2998,6 +3351,7 @@ async function retryFailed() {
   return publicStatus();
 }
 
+// ==== Current-page inspection and review ====
 function compactNotionId(value) {
   return String(value ?? "").replace(/-/g, "").toLocaleLowerCase("en-US");
 }
@@ -3027,6 +3381,12 @@ async function inspectPage(pageId) {
   };
 }
 
+/**
+ * Opens a single-page topic review from the current Notion page's AI 暫定主題.
+ * Reads the page (readyNotion may update schema). If status is 待主題整理,
+ * writes 待主題確認 so the page matches the review session. Does not call AI
+ * and does not move names into AI 主題; resolveTopicReview does that later.
+ */
 async function reviewCurrentPageTopics(pageId) {
   ensureNoTopicReview();
   if (stateCache.running) {
@@ -3095,6 +3455,12 @@ async function reviewCurrentPageTopics(pageId) {
   return publicStatus();
 }
 
+/**
+ * Queues the current Notion page for single-review analysis (mode
+ * single_review) and schedules processOne. Reads the page via inspectPage;
+ * does not call AI. Does not write analysis fields or clear confirmed AI 主題
+ * here: processItem does that when the item actually runs.
+ */
 async function reanalyzePage(pageId, force = false) {
   ensureNoTopicReview();
   if (stateCache.running) throw new AppError("目前正在分析其他文章，請先停止或等候完成", { code: "BUSY" });
@@ -3113,6 +3479,7 @@ async function reanalyzePage(pageId, force = false) {
   return publicStatus();
 }
 
+// ==== Message routing and Chrome event listeners ====
 async function handleMessage(message) {
   await initialize();
   switch (message?.type) {

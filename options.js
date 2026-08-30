@@ -1,5 +1,6 @@
 "use strict";
 
+// ==== DOM references and local UI state ====
 const form = document.querySelector("#settings-form");
 const statusBox = document.querySelector("#status");
 const notionToken = document.querySelector("#notion-token");
@@ -67,100 +68,34 @@ let manualCandidateName = "";
 let topicOrganizerPreferences = {};
 const NO_PENDING_MESSAGE = "目前沒有待分析文章。請先在 Notion 將要處理文章的「整理狀態」設為「待分析」。";
 
+// ==== Shared custom select ====
 function closeEnhancedSelects(except = null) {
   for (const controller of enhancedSelects.values()) {
     if (controller !== except) controller.close();
   }
 }
 
+/**
+ * Options wrapper around AnalyzerSelect. Five ids get custom-select--regular;
+ * all use matchNativeState, emptyLabel 「請選擇」, and onToggle to close other
+ * enhanced menus. Document close/Escape is handled on this page, so
+ * attachDocumentListeners is false. Extra native change → sync.
+ */
 function enhanceSelect(select) {
   if (!select || enhancedSelects.has(select)) return enhancedSelects.get(select);
-  const root = document.createElement("div");
-  root.className = "custom-select";
-  if (["gemini-model", "vertex-model", "openrouter-model", "request-timeout", "manual-existing-topic"]
-    .includes(select.id)) {
-    root.classList.add("custom-select--regular");
-  }
-  select.before(root);
-  root.append(select);
-  select.classList.add("custom-select__native");
-
-  const trigger = document.createElement("button");
-  trigger.id = `${select.id}-trigger`;
-  trigger.className = "custom-select__trigger";
-  trigger.type = "button";
-  trigger.setAttribute("aria-haspopup", "listbox");
-  trigger.setAttribute("aria-expanded", "false");
-  const value = document.createElement("span");
-  value.className = "custom-select__value";
-  const arrow = document.createElement("span");
-  arrow.className = "custom-select__arrow";
-  arrow.setAttribute("aria-hidden", "true");
-  arrow.textContent = "⌄";
-  trigger.append(value, arrow);
-
-  const menu = document.createElement("div");
-  menu.id = `${select.id}-menu`;
-  menu.className = "custom-select__menu";
-  menu.role = "listbox";
-  menu.hidden = true;
-  trigger.setAttribute("aria-controls", menu.id);
-  root.append(trigger, menu);
-
-  const originalLabel = document.querySelector(`label[for="${select.id}"]`);
-  if (originalLabel) originalLabel.htmlFor = trigger.id;
-
-  const controller = {
-    close() {
-      menu.hidden = true;
-      trigger.setAttribute("aria-expanded", "false");
-    },
-    sync() {
-      root.hidden = select.hidden;
-      const selected = select.selectedOptions[0];
-      value.textContent = selected?.textContent || "請選擇";
-      value.title = value.textContent;
-      trigger.disabled = select.disabled || select.options.length === 0;
-      menu.replaceChildren(...[...select.options].map(option => {
-        const item = document.createElement("button");
-        item.className = "custom-select__option";
-        item.type = "button";
-        item.role = "option";
-        item.dataset.value = option.value;
-        item.disabled = option.disabled;
-        item.setAttribute("aria-selected", String(option.selected));
-        const check = document.createElement("span");
-        check.className = `custom-select__check${option.selected ? "" : " custom-select__check--empty"}`;
-        check.setAttribute("aria-hidden", "true");
-        check.textContent = "✓";
-        const label = document.createElement("span");
-        label.textContent = option.textContent;
-        item.append(check, label);
-        item.addEventListener("click", () => {
-          select.value = option.value;
-          select.dispatchEvent(new Event("change", { bubbles: true }));
-          controller.sync();
-          controller.close();
-          trigger.focus();
-        });
-        return item;
-      }));
+  const extraRootClass = ["gemini-model", "vertex-model", "openrouter-model", "request-timeout", "manual-existing-topic"]
+    .includes(select.id) ? "custom-select--regular" : "";
+  const controller = AnalyzerSelect.enhance(select, {
+    extraRootClass,
+    emptyLabel: "請選擇",
+    matchNativeState: true,
+    attachDocumentListeners: false,
+    onToggle(controller, opening) {
+      closeEnhancedSelects(opening ? controller : null);
     }
-  };
+  });
   enhancedSelects.set(select, controller);
-  trigger.addEventListener("click", () => {
-    const opening = menu.hidden;
-    closeEnhancedSelects(opening ? controller : null);
-    menu.hidden = !opening;
-    trigger.setAttribute("aria-expanded", String(opening));
-  });
   select.addEventListener("change", () => controller.sync());
-  new MutationObserver(() => controller.sync()).observe(select, {
-    attributes: true,
-    childList: true,
-    subtree: true
-  });
-  controller.sync();
   return controller;
 }
 
@@ -210,6 +145,12 @@ function normalizeFormOutputSpec(writeBack = false) {
   return spec;
 }
 
+// ==== Background messaging ====
+/**
+ * chrome.runtime.sendMessage wrapper. Throws on ok false. Settings UI uses
+ * GET_CONFIG / SAVE_SETTINGS; organizer UI uses GET_TOPIC_ORGANIZER and
+ * apply/skip/rollback/manual messages. Does not poll.
+ */
 async function send(type, extra = {}) {
   const response = await chrome.runtime.sendMessage({ type, ...extra });
   if (!response?.ok) throw new Error(response?.error?.message || "操作失敗");
@@ -264,12 +205,27 @@ function settingsFromForm() {
   };
 }
 
+// ==== AI provider and model discovery ====
+/**
+ * Returns the model <select> for the currently chosen provider. Sends no
+ * messages. Does not change values; LIST_MODELS and TEST_CONNECTIONS are
+ * sent by the scan/test buttons. Provider tests, schema, and AI calls stay
+ * in background.js.
+ */
 function activeModelElement() {
   if (aiProvider.value === "vertex") return vertexModel;
   if (aiProvider.value === "openrouter") return openRouterModel;
   return geminiModel;
 }
 
+/**
+ * Shows the selected provider's key/model fields and hides the others, then
+ * syncs enhanced selects and OpenRouter price UI. Sends no messages. Updates
+ * gemini/vertex/openrouter settings and model-select hidden state, the
+ * load-models button label, and modelSummary. LIST_MODELS is sent by the
+ * scan/load-models button; TEST_CONNECTIONS by the test button. Provider tests,
+ * schema PATCHes, and AI calls stay in background.js.
+ */
 function updateProviderUi() {
   const provider = aiProvider.value;
   geminiSettings.hidden = provider !== "gemini";
@@ -293,6 +249,13 @@ function formatUsd(value) {
   return `US$${new Intl.NumberFormat("en-US", { maximumFractionDigits: 4 }).format(value)}`;
 }
 
+/**
+ * Updates the OpenRouter paid-confirmation row from the selected option's
+ * dataset (isFree / prices). Sends no messages. Updates paid-row / warning
+ * visibility, the confirmation checkbox, and the price warning text.
+ * Clears or restores the checkbox when the model changes. Persistence is
+ * SAVE_SETTINGS; provider tests, schema, and AI calls stay in background.js.
+ */
 function updateOpenRouterPriceUi(modelChanged = false) {
   const option = openRouterModel.selectedOptions[0];
   const isFree = option?.dataset.isFree === "true"
@@ -351,6 +314,12 @@ function modelLabel(model) {
   return `${display}${recommended}${pricing ? `｜${pricing}` : ""}${limits ? `｜${limits}` : ""}`;
 }
 
+/**
+ * Ensures a stored model name exists as an option before loadConfig assigns
+ * select.value. Sends no messages. Appends one option onto the given model
+ * select when missing. Does not call LIST_MODELS; provider tests, schema, and
+ * AI calls stay in background.js.
+ */
 function ensureModelOption(select, name, label = name) {
   if ([...select.options].some(option => option.value === name)) return;
   const option = document.createElement("option");
@@ -360,6 +329,14 @@ function ensureModelOption(select, name, label = name) {
   select.append(option);
 }
 
+/**
+ * Replaces one model <select> from a LIST_MODELS result array and syncs its
+ * AnalyzerSelect. Sends no messages. Rebuilds options (including price
+ * datasets), then selects previous value, else gemini-3.5-flash-lite, else
+ * the first model. The load-models click handler is what sends LIST_MODELS
+ * after SAVE_SETTINGS. Provider tests, schema, and AI calls stay in
+ * background.js.
+ */
 function renderModels(select, models, selected) {
   const options = models.map(model => {
     const option = document.createElement("option");
@@ -383,6 +360,13 @@ function renderModels(select, models, selected) {
   enhancedSelects.get(select)?.sync();
 }
 
+// ==== Settings form ====
+/**
+ * SAVE_SETTINGS from the form. Local guards for empty target/model, OpenRouter
+ * paid confirmation, and output-spec ranges run first. Secrets are not
+ * written back into the inputs; placeholders show has*Key. Does not call
+ * TEST_CONNECTIONS or ensureSchema.
+ */
 async function saveSettings(showConfirmation = true) {
   if (!notionTarget.value.trim()) throw new Error("請填入 Notion 資料庫網址或 Data Source ID");
   if (!activeModelElement().value.trim()) throw new Error("請選擇分析模型");
@@ -414,6 +398,10 @@ async function saveSettings(showConfirmation = true) {
   return config;
 }
 
+/**
+ * GET_CONFIG into the form, then GET_TOPIC_ORGANIZER and renderOrganizer.
+ * Secret values are not returned; placeholders show whether keys exist.
+ */
 async function loadConfig() {
   try {
     const config = await send("GET_CONFIG");
@@ -516,6 +504,12 @@ testButton.addEventListener("click", async () => {
   }
 });
 
+/**
+ * SAVE_SETTINGS then LIST_MODELS. renderModels replaces options on the
+ * active provider's model select and syncs its AnalyzerSelect; then
+ * updateOpenRouterPriceUi refreshes paid-row state. Provider tests
+ * (TEST_CONNECTIONS), schema PATCHes, and AI calls stay in background.js.
+ */
 loadModelsButton.addEventListener("click", async () => {
   setBusy(true);
   showStatus("正在讀取目前服務商的可用模型…", "info");
@@ -565,6 +559,7 @@ clearButton.addEventListener("click", async () => {
 aiProvider.addEventListener("change", updateProviderUi);
 openRouterModel.addEventListener("change", () => updateOpenRouterPriceUi(true));
 
+// ==== Prompt and output-spec editing ====
 function currentOutputSpec() {
   return normalizeFormOutputSpec(false);
 }
@@ -622,13 +617,12 @@ document.querySelector("#preview-prompt").addEventListener("click", async () => 
   }
 });
 
-function renderOrganizer() {
-  topicGroups.replaceChildren();
-  const unclassified = organizerData?.unclassified ?? [];
-  const manualItems = organizerData?.manualItems ?? unclassified.map(name => ({ name, impactCount: 0 }));
-  if (!manualItems.some(item => item.name === manualCandidateName)) {
-    manualCandidateName = manualItems[0]?.name || "";
-  }
+// ==== Topic organizer rendering ====
+/**
+ * Unclassified AI 暫定主題 pills. Clicking one sets manualCandidateName and
+ * re-renders the manual panel. Does not send messages.
+ */
+function renderUnclassifiedPills(manualItems, unclassified) {
   unclassifiedTopics.replaceChildren(...manualItems.map(item => {
     const button = document.createElement("button");
     button.type = "button";
@@ -642,6 +636,13 @@ function renderOrganizer() {
   }));
   unclassifiedSummary.textContent = `本輪未分類 ${unclassified.length} 個暫定主題`;
   unclassifiedPanel.hidden = unclassified.length === 0;
+}
+
+/**
+ * Manual panel for one unclassified AI 暫定主題. skip stays local; discard
+ * / approve / replace / custom write Notion via resolveManualTopic.
+ */
+function renderManualReviewPanel(manualItems) {
   const manualItem = manualItems.find(item => item.name === manualCandidateName);
   manualTopicReview.hidden = !manualItem;
   if (manualItem) {
@@ -663,102 +664,150 @@ function renderOrganizer() {
       manualExistingTopic.value = previousSelection;
     }
   }
+}
+
+/**
+ * Status line for the organizer panel from organizerData: page/candidate
+ * counts, remaining groups, unclassified AI 暫定主題, applied/skipped counts,
+ * warnings, and apply progress. Local string only; does not send messages.
+ */
+function organizerSummaryText(unclassified) {
   if (!organizerData?.groups?.length) {
-    organizerSummary.textContent = organizerData?.status === "cleared"
+    return organizerData?.status === "cleared"
       ? "目前的整理建議已清除；Notion 主題、文章內容與本機主題字典都沒有變動。"
       : organizerData
       ? `已掃描 ${organizerData.pageCount} 篇頁面，讀取 ${organizerData.occurrenceCount} 次暫定主題（去重後 ${organizerData.candidateCount} 個）；${unclassified.length ? `本輪 ${unclassified.length} 個未找到合適分類。` : "目前沒有尚待確認的建議。"}`
       : "尚未產生建議。";
-    document.querySelector("#rollback-topics").disabled = !organizerData?.canRollback;
-    return;
   }
-  organizerSummary.textContent = `已掃描 ${organizerData.pageCount} 篇頁面，讀取 ${organizerData.occurrenceCount} 次暫定主題（去重後 ${organizerData.candidateCount} 個），尚有 ${organizerData.groups.length} 組建議待確認；本輪未分類 ${unclassified.length} 個。${organizerData.appliedCount ? ` 已套用 ${organizerData.appliedCount} 個暫定主題。` : ""}${organizerData.skippedCount ? ` 本次暫不處理 ${organizerData.skippedCount} 組。` : ""}`;
+  let text = `已掃描 ${organizerData.pageCount} 篇頁面，讀取 ${organizerData.occurrenceCount} 次暫定主題（去重後 ${organizerData.candidateCount} 個），尚有 ${organizerData.groups.length} 組建議待確認；本輪未分類 ${unclassified.length} 個。${organizerData.appliedCount ? ` 已套用 ${organizerData.appliedCount} 個暫定主題。` : ""}${organizerData.skippedCount ? ` 本次暫不處理 ${organizerData.skippedCount} 組。` : ""}`;
   if (organizerData.warnings?.length) {
-    organizerSummary.textContent += ` 另有 ${organizerData.warnings.length} 項安全提醒。`;
+    text += ` 另有 ${organizerData.warnings.length} 項安全提醒。`;
   }
   if (organizerData.progress) {
-    organizerSummary.textContent += ` 目前進度：${organizerData.progress.done}/${organizerData.progress.total}（${organizerData.status}）。`;
+    text += ` 目前進度：${organizerData.progress.done}/${organizerData.progress.total}（${organizerData.status}）。`;
   }
-  const cards = organizerData.groups.map(group => {
-    const card = document.createElement("article");
-    card.className = `topic-group${group.selected ? " selected" : ""}`;
-    const head = document.createElement("div");
-    head.className = "topic-group-head";
-    const selected = document.createElement("input");
-    selected.type = "checkbox";
-    selected.checked = Boolean(group.selected);
-    selected.addEventListener("change", () => {
-      group.selected = selected.checked;
-      if (selected.checked && !(group.selectedAliases ?? []).length) {
-        group.selectedAliases = [...(group.aliases ?? [])];
-        renderOrganizer();
-        return;
-      }
-      card.classList.toggle("selected", selected.checked);
-    });
-    const name = document.createElement("input");
-    name.type = "text";
-    name.value = group.standardTopic;
-    name.setAttribute("aria-label", "標準主題名稱");
-    name.addEventListener("input", () => { group.standardTopic = name.value.trim(); });
-    const confidence = document.createElement("span");
-    confidence.className = "confidence";
-    confidence.textContent = `${group.confidence === "high" ? "高" : group.confidence === "medium" ? "中" : "低"}信心`;
-    head.append(selected, name, confidence);
-    const reason = document.createElement("p");
-    reason.className = "hint";
-    reason.textContent = `建議說明：${group.reason || group.definition || "未提供說明"}`;
-    const source = document.createElement("p");
-    source.className = "topic-source";
-    source.textContent = (group.aliases ?? []).length > 1
-      ? "可合併為此分類的暫定主題（可分開勾選）"
-      : "建議加入此既有 AI 主題";
-    const aliasList = document.createElement("div");
-    aliasList.className = "alias-list";
-    const selectedAliasKeys = new Set((group.selectedAliases ?? []).map(topic => topic.normalize("NFKC").toLocaleLowerCase("zh-Hant-TW")));
-    aliasList.append(...(group.aliases ?? []).map(alias => {
-      const label = document.createElement("label");
-      const checkbox = document.createElement("input");
-      const key = alias.normalize("NFKC").toLocaleLowerCase("zh-Hant-TW");
-      checkbox.type = "checkbox";
-      checkbox.checked = selectedAliasKeys.has(key);
-      checkbox.addEventListener("change", () => {
-        if (checkbox.checked) selectedAliasKeys.add(key);
-        else selectedAliasKeys.delete(key);
-        group.selectedAliases = (group.aliases ?? []).filter(topic =>
-          selectedAliasKeys.has(topic.normalize("NFKC").toLocaleLowerCase("zh-Hant-TW"))
-        );
-      });
-      label.append(checkbox, document.createTextNode(alias));
-      return label;
-    }));
-    const separate = document.createElement("p");
-    separate.className = "hint topic-separate";
-    separate.textContent = (group.keepSeparate ?? []).length
-      ? `建議保持獨立：${group.keepSeparate.join("、")}`
-      : "";
-    separate.hidden = !(group.keepSeparate ?? []).length;
-    const impact = document.createElement("p");
-    impact.className = "hint topic-impact";
-    impact.textContent = `若套用，將更新 ${group.impactCount} 篇`;
-    const skip = document.createElement("button");
-    skip.type = "button";
-    skip.className = "text-button topic-skip";
-    skip.textContent = "暫不處理這個建議";
-    skip.addEventListener("click", async () => {
-      try {
-        organizerData = await send("SKIP_TOPIC_GROUP", { groupId: group.id, groups: organizerData.groups });
-        renderOrganizer();
-        showStatus("這次先不處理；下次重新掃描時仍可能以其他方向出現。", "info");
-      } catch (error) { showStatus(error.message, "error"); }
-    });
-    card.append(head, reason, source, aliasList, separate, impact, skip);
-    return card;
-  });
-  topicGroups.append(...cards);
-  document.querySelector("#rollback-topics").disabled = !organizerData.canRollback;
+  return text;
 }
 
+function updateRollbackButton() {
+  document.querySelector("#rollback-topics").disabled = !organizerData?.canRollback;
+}
+
+/**
+ * One organizer group card: standard name (may become confirmed AI 主題),
+ * alias checkboxes for AI 暫定主題, skip via SKIP_TOPIC_GROUP. Draft
+ * selected / selectedAliases / standardTopic live on the group object; skip
+ * sends organizerData.groups to the background and persists them, as apply
+ * does. They do not remain local until apply.
+ */
+function renderOrganizerGroupCard(group) {
+  const card = document.createElement("article");
+  card.className = `topic-group${group.selected ? " selected" : ""}`;
+  const head = document.createElement("div");
+  head.className = "topic-group-head";
+  const selected = document.createElement("input");
+  selected.type = "checkbox";
+  selected.checked = Boolean(group.selected);
+  selected.addEventListener("change", () => {
+    group.selected = selected.checked;
+    if (selected.checked && !(group.selectedAliases ?? []).length) {
+      group.selectedAliases = [...(group.aliases ?? [])];
+      renderOrganizer();
+      return;
+    }
+    card.classList.toggle("selected", selected.checked);
+  });
+  const name = document.createElement("input");
+  name.type = "text";
+  name.value = group.standardTopic;
+  name.setAttribute("aria-label", "標準主題名稱");
+  name.addEventListener("input", () => { group.standardTopic = name.value.trim(); });
+  const confidence = document.createElement("span");
+  confidence.className = "confidence";
+  confidence.textContent = `${group.confidence === "high" ? "高" : group.confidence === "medium" ? "中" : "低"}信心`;
+  head.append(selected, name, confidence);
+  const reason = document.createElement("p");
+  reason.className = "hint";
+  reason.textContent = `建議說明：${group.reason || group.definition || "未提供說明"}`;
+  const source = document.createElement("p");
+  source.className = "topic-source";
+  source.textContent = (group.aliases ?? []).length > 1
+    ? "可合併為此分類的暫定主題（可分開勾選）"
+    : "建議加入此既有 AI 主題";
+  const aliasList = document.createElement("div");
+  aliasList.className = "alias-list";
+  const selectedAliasKeys = new Set((group.selectedAliases ?? []).map(topic => topic.normalize("NFKC").toLocaleLowerCase("zh-Hant-TW")));
+  aliasList.append(...(group.aliases ?? []).map(alias => {
+    const label = document.createElement("label");
+    const checkbox = document.createElement("input");
+    const key = alias.normalize("NFKC").toLocaleLowerCase("zh-Hant-TW");
+    checkbox.type = "checkbox";
+    checkbox.checked = selectedAliasKeys.has(key);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) selectedAliasKeys.add(key);
+      else selectedAliasKeys.delete(key);
+      group.selectedAliases = (group.aliases ?? []).filter(topic =>
+        selectedAliasKeys.has(topic.normalize("NFKC").toLocaleLowerCase("zh-Hant-TW"))
+      );
+    });
+    label.append(checkbox, document.createTextNode(alias));
+    return label;
+  }));
+  const separate = document.createElement("p");
+  separate.className = "hint topic-separate";
+  separate.textContent = (group.keepSeparate ?? []).length
+    ? `建議保持獨立：${group.keepSeparate.join("、")}`
+    : "";
+  separate.hidden = !(group.keepSeparate ?? []).length;
+  const impact = document.createElement("p");
+  impact.className = "hint topic-impact";
+  impact.textContent = `若套用，將更新 ${group.impactCount} 篇`;
+  const skip = document.createElement("button");
+  skip.type = "button";
+  skip.className = "text-button topic-skip";
+  skip.textContent = "暫不處理這個建議";
+  skip.addEventListener("click", async () => {
+    try {
+      organizerData = await send("SKIP_TOPIC_GROUP", { groupId: group.id, groups: organizerData.groups });
+      renderOrganizer();
+      showStatus("這次先不處理；下次重新掃描時仍可能以其他方向出現。", "info");
+    } catch (error) { showStatus(error.message, "error"); }
+  });
+  card.append(head, reason, source, aliasList, separate, impact, skip);
+  return card;
+}
+
+/**
+ * Rebuilds unclassified pills, the manual panel, group cards, summary, and
+ * rollback enabled state from organizerData. Draft values (selected,
+ * selectedAliases, standardTopic) live on those objects and are sent with
+ * SKIP_TOPIC_GROUP as well as APPLY_TOPIC_GROUPS, so skip also persists them.
+ */
+function renderOrganizer() {
+  topicGroups.replaceChildren();
+  const unclassified = organizerData?.unclassified ?? [];
+  const manualItems = organizerData?.manualItems ?? unclassified.map(name => ({ name, impactCount: 0 }));
+  if (!manualItems.some(item => item.name === manualCandidateName)) {
+    manualCandidateName = manualItems[0]?.name || "";
+  }
+  renderUnclassifiedPills(manualItems, unclassified);
+  renderManualReviewPanel(manualItems);
+  if (!organizerData?.groups?.length) {
+    organizerSummary.textContent = organizerSummaryText(unclassified);
+    updateRollbackButton();
+    return;
+  }
+  organizerSummary.textContent = organizerSummaryText(unclassified);
+  topicGroups.append(...organizerData.groups.map(group => renderOrganizerGroupCard(group)));
+  updateRollbackButton();
+}
+
+// ==== Manual unclassified-topic resolution ====
+/**
+ * RESOLVE_ORGANIZER_UNCLASSIFIED. skip is local-only. discard permanently
+ * removes the AI 暫定主題 from affected pages without adding AI 主題.
+ * approve / replace / custom write pages like apply.
+ */
 async function resolveManualTopic(action) {
   const candidate = manualCandidateName;
   if (!candidate) return showStatus("目前沒有等待人工確認的暫定主題。", "error");
@@ -837,6 +886,7 @@ document.querySelector("#rollback-topics").addEventListener("click", async () =>
     showStatus("已回復上一次套用。", "success");
   } catch (error) { showStatus(error.message, "error"); }
 });
+// ==== Topic dictionary import and export ====
 document.querySelector("#export-dictionary").addEventListener("click", async () => {
   try {
     const value = await send("EXPORT_TOPIC_DICTIONARY");
