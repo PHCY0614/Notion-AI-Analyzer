@@ -42,7 +42,7 @@ AI KEYWORDS
 - Return independently searchable concepts.
 - The set must cover: (1) the primary subject, project, product, or problem; (2) the central event, decision, action, recommendation, or current status; and (3) important mechanisms, methods, terminology, or defining concepts.
 - Prioritize the core subject and central event first, then overall coverage and future search usefulness, then distinctive terminology and representative details.
-- Do not prioritize a number, amount, date, statistic, or sensational detail merely because it is memorable. An amount such as「九位數投入」is appropriate only when financing or investment size is itself central; otherwise terms such as「AI 遊戲計畫」and「計畫暫緩」have higher priority.
+- Do not prioritize a number, amount, date, statistic, or sensational detail merely because it is memorable. An amount such as 「百億投資」 is appropriate only when financing or investment size is itself central; otherwise terms such as 「晶片擴產」 and 「建廠延後」 have higher priority.
 - Each keyword must represent one coherent concept. Conjunctions and separators are allowed when they are intrinsic to one established phrase, proper name, title, or technical term such as「A/B 測試」or「CI/CD」.
 
 AI SUMMARY
