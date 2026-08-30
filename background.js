@@ -3044,9 +3044,11 @@ async function resolveTopicReview(action, replacementTopic = "", customTopic = "
     const existingCustom = byKey.get(N.topicKey(custom));
     selectedTopic = existingCustom || custom;
     topicDecision = existingCustom ? "custom_existing" : "custom_new";
-  } else if (action === "skip" || action === "discard") {
+  } else if (action === "skip") {
     review.skippedCandidates.push(candidate);
     topicDecision = "temporarily_skipped";
+  } else if (action === "discard") {
+    topicDecision = "discarded";
   } else {
     throw new AppError("未知的新主題確認操作", { code: "TOPIC_REVIEW_ACTION_INVALID" });
   }
@@ -3074,14 +3076,16 @@ async function resolveTopicReview(action, replacementTopic = "", customTopic = "
   review.decisions.push(decision);
   review.remainingCandidates = review.remainingCandidates.slice(1);
 
-  if (selectedTopic) {
+  if (selectedTopic || action === "discard") {
     const currentPage = await notionRequest(`/v1/pages/${review.item.id}`, { token });
     const currentValues = N.pagePropertyValues(currentPage);
     const candidateKey = N.topicKey(candidate);
     const unresolvedTopics = uniqueTopicNames(
       currentValues.provisionalTopics.filter(name => N.topicKey(name) !== candidateKey)
     );
-    const finalTopics = uniqueTopicNames([...(currentValues.aiTopics ?? []), selectedTopic]);
+    const finalTopics = selectedTopic
+      ? uniqueTopicNames([...(currentValues.aiTopics ?? []), selectedTopic])
+      : uniqueTopicNames(currentValues.aiTopics ?? []);
     const status = unresolvedTopics.length ? N.STATUS.topicReview : N.STATUS.analyzed;
     await notionRequest(`/v1/pages/${review.item.id}`, {
       method: "PATCH",
@@ -3090,7 +3094,12 @@ async function resolveTopicReview(action, replacementTopic = "", customTopic = "
       token
     });
 
-    if (decision.rememberMapping) {
+    if (action === "discard") {
+      config.discardedTopicNames = normalizeDiscardedTopicNames([
+        ...(config.discardedTopicNames ?? []),
+        candidate
+      ]);
+    } else if (decision.rememberMapping) {
       config.topicDictionary = mergeDictionaryEntries(config.topicDictionary, [{
         name: selectedTopic,
         definition: "由單篇主題確認流程建立的主題對照。",
