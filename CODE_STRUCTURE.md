@@ -35,7 +35,7 @@ Libraries attach an IIFE to `globalThis` (`AnalyzerShared`, `AnalyzerPrompt`, `A
 | `popup.html` / `popup.css` | Popup chrome. `#discard-topic` label is 「這次暫不處理」. |
 | `options.html` / `options.css` | Settings and organizer page. |
 | `AGENTS.md` | Behavioural stability rules for refactors. |
-| `PRIVACY.md` | Product privacy/data-flow notes (Chinese). |
+| `PRIVACY.md` / `PRIVACY.zh-TW.md` | English and Traditional Chinese privacy and data-flow documentation. |
 
 `background.js` aliases loaded modules as `S`, `P`, `N`, `G`.
 
@@ -60,7 +60,7 @@ Statuses: `待分析` → `分析中` → `待主題整理` (batch) or `待主�
 - `AI 主題` is confirmed taxonomy, written only after a human (or remembered mapping) decision in single-page review, or after organizer apply / unclassified resolve (approve / replace / custom).
 - Reanalysis of an already-analyzed page runs in `single_review` mode and **clears confirmed `AI 主題`** when the draft is written, then opens topic review. Batch analysis leaves confirmed `AI 主題` unchanged so the organizer can apply later.
 
-`ensureSchema` / `readyNotion` may PATCH a missing data-source schema (AI fields and remaining status options) after `整理狀態` + `待分析` already exist. They do not delete or rename user-created options. Scan / test / queue commands are therefore not read-only on the data source.
+`ensureSchema` / `readyNotion` may PATCH a missing data-source schema (AI fields and remaining status options) only when `整理狀態` already exists, its type is select, and it includes the `待分析` option. They do not delete or rename user-created options. Scan, test, queue, and popup inspection paths are therefore not necessarily read-only on the data source.
 
 ## Chrome storage
 
@@ -158,7 +158,7 @@ Popup `#discard-topic` stays enabled unless `canDiscard === false`; that flag st
 
 ## Topic organizer
 
-`prepareTopicOrganizer` queries pages in `待主題整理` / `待主題確認` until it has at most **75** distinct provisional names (`G.TOPIC_ORGANIZER_BATCH_LIMIT`), or no more matching pages. It reads only status, `AI 暫定主題`, and `AI 主題`. Page body, AI title/summary/keywords, and co-occurrence are not sent to the model.
+`prepareTopicOrganizer` queries pages in `待主題整理` / `待主題確認` until it has at most **75** distinct provisional names (`G.TOPIC_ORGANIZER_BATCH_LIMIT`), or no more matching pages. Its Notion query requests only the `整理狀態`, `AI 暫定主題`, and `AI 主題` database properties; standard top-level page metadata may still be present in the response. Page body, AI title/summary/keywords, and co-occurrence are not sent to the model.
 
 Names already mapped by Notion options, remembered page resolutions, or the dictionary become confirmed groups without an AI call. Remaining names go through `requestOrganizerGroups`: schema → compatibility (`canRetryTopicOrganizerWithoutSchema`) → repair, at most three AI calls. If JSON still fails, the whole remainder stays unclassified rather than emitting bad group cards.
 

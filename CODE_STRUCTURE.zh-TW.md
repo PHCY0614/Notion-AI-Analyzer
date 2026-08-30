@@ -35,7 +35,7 @@ background.js service worker
 | `popup.html`／`popup.css` | Popup 畫面。`#discard-topic` 文案是「這次暫不處理」。 |
 | `options.html`／`options.css` | 設定與主題整理頁。 |
 | `AGENTS.md` | 重構時的行為穩定規則。 |
-| `PRIVACY.md` | 產品隱私與資料流說明（中文）。 |
+| `PRIVACY.md` / `PRIVACY.zh-TW.md` | 英文與繁中隱私及資料流說明。 |
 
 `background.js` 把載入的模組簡稱為 `S`、`P`、`N`、`G`。
 
@@ -60,7 +60,7 @@ background.js service worker
 - `AI 主題` 是已確認的分類，只在單篇確認裡經人工（或已記住的對照）決定後寫入，或在整理套用／未分類處置（採用／改用／自訂）時寫入。
 - 對已分析頁面再分析會以 `single_review` 模式執行，**在寫入草稿時清空已確認的 `AI 主題`**，然後開啟主題確認。批次分析不改動已確認的 `AI 主題`，以便之後由主題整理套用。
 
-`ensureSchema`／`readyNotion` 在已有 `整理狀態` 與 `待分析` 之後，可能 PATCH 缺少的 data-source schema（AI 欄位與其餘狀態選項）。它們不會刪除或改名使用者自建的選項。因此掃描／測試／佇列指令對 data source 並非唯讀。
+`ensureSchema`／`readyNotion` 只有在 `整理狀態` 已存在、型別為 select，且包含 `待分析` 時，才可能 PATCH 缺少的 data-source schema（AI 欄位與其餘狀態選項）。它們不會刪除或改名使用者自建的選項。因此掃描、測試、佇列與 Popup inspection 路徑對 data source 不一定是唯讀。
 
 ## Chrome storage
 
@@ -158,7 +158,7 @@ Popup 的 `#discard-topic` 除非 `canDiscard === false` 否則維持可按；�
 
 ## 主題整理
 
-`prepareTopicOrganizer` 查詢 `待主題整理`／`待主題確認` 頁面，直到收集到最多 **75** 個去重後的暫定名稱（`G.TOPIC_ORGANIZER_BATCH_LIMIT`），或已沒有更多符合條件的頁面。它只讀取狀態、`AI 暫定主題` 與 `AI 主題`。頁面正文、AI 標題／摘要／關鍵字與共現關係都不會送給模型。
+`prepareTopicOrganizer` 查詢 `待主題整理`／`待主題確認` 頁面，直到收集到最多 **75** 個去重後的暫定名稱（`G.TOPIC_ORGANIZER_BATCH_LIMIT`），或已沒有更多符合條件的頁面。它的 Notion 查詢只要求回傳 `整理狀態`、`AI 暫定主題` 與 `AI 主題` 三個資料庫欄位；回應仍可能包含標準的頁面頂層 metadata。頁面正文、AI 標題／摘要／關鍵字與共現關係都不會送給模型。
 
 已被 Notion 選項、已記住的頁面對照或字典對上的名稱，會直接成為確認群組、不呼叫 AI。其餘名稱走 `requestOrganizerGroups`：schema → 相容模式（`canRetryTopicOrganizerWithoutSchema`）→ 修復，最多三次 AI 呼叫。若 JSON 仍失敗，整批剩餘項目改列未分類，而不是產出錯誤卡片。
 
