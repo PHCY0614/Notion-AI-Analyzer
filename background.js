@@ -407,6 +407,22 @@ function retryDelay(response, attempt) {
     + Math.floor(Math.random() * 180);
 }
 
+// Every HTTP call below reads the response body as text first (so a non-JSON
+// error page never throws before we can build a useful AppError), then tries
+// to parse it as JSON. `fallbackShape` controls what we return when parsing
+// fails: Notion's error helper reads `data.message`, while every AI provider
+// helper reads `data.error.message` (see errorMessage() above, which checks
+// both paths). Keeping both shapes lets each caller stay unchanged.
+async function readJsonResponse(response, fallbackShape = "error") {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallbackShape === "message" ? { message: text } : { error: { message: text } };
+  }
+}
+
 function abortableSleep(milliseconds, signal) {
   if (!signal) return S.sleep(milliseconds);
   if (signal.aborted) return Promise.reject(new DOMException("已停止", "AbortError"));
@@ -452,13 +468,7 @@ async function notionRequest(path, options = {}) {
       continue;
     }
 
-    const text = await response.text();
-    let data = {};
-    try {
-      data = text ? JSON.parse(text) : {};
-    } catch {
-      data = { message: text };
-    }
+    const data = await readJsonResponse(response, "message");
     if (response.ok) return data;
 
     const transient = response.status === 429 || [500, 502, 503, 504, 529].includes(response.status);
@@ -510,13 +520,7 @@ async function geminiRequest(model, payload, options = {}) {
       continue;
     }
 
-    const text = await response.text();
-    let data = {};
-    try {
-      data = text ? JSON.parse(text) : {};
-    } catch {
-      data = { error: { message: text } };
-    }
+    const data = await readJsonResponse(response);
     if (response.ok) return data;
 
     if ([500, 502, 503, 504].includes(response.status) && attempt < 2) {
@@ -569,13 +573,7 @@ async function vertexRequest(model, payload, options = {}) {
       continue;
     }
 
-    const text = await response.text();
-    let data = {};
-    try {
-      data = text ? JSON.parse(text) : {};
-    } catch {
-      data = { error: { message: text } };
-    }
+    const data = await readJsonResponse(response);
     if (response.ok) return data;
 
     if ([500, 502, 503, 504].includes(response.status) && attempt < 2) {
@@ -685,13 +683,7 @@ async function openRouterRequest(model, payload, options = {}) {
       continue;
     }
 
-    const text = await response.text();
-    let data = {};
-    try {
-      data = text ? JSON.parse(text) : {};
-    } catch {
-      data = { error: { message: text } };
-    }
+    const data = await readJsonResponse(response);
     if (response.ok) return normalizeOpenRouterResponse(data);
 
     if ([500, 502, 503, 504].includes(response.status) && attempt < 2) {
@@ -806,13 +798,7 @@ async function listOpenRouterModels(apiKey = "") {
   } catch {
     throw new AppError("無法連線到 OpenRouter，請檢查網路後再試", { code: "OPENROUTER_NETWORK" });
   }
-  const text = await response.text();
-  let data = {};
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch {
-    data = { error: { message: text } };
-  }
+  const data = await readJsonResponse(response);
   if (!response.ok) {
     throw new AppError(errorMessage(data, `OpenRouter 模型清單錯誤 ${response.status}`), {
       code: [401, 403].includes(response.status) ? "OPENROUTER_AUTH" : "OPENROUTER_API",
@@ -896,13 +882,7 @@ async function testVertexModel(config) {
       body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "連線測試" }] }] })
     }
   );
-  const text = await response.text();
-  let data = {};
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch {
-    data = { error: { message: text } };
-  }
+  const data = await readJsonResponse(response);
   if (!response.ok) {
     throw new AppError(errorMessage(data, `Vertex AI 連線測試錯誤 ${response.status}`), {
       code: [400, 401, 403].includes(response.status) ? "VERTEX_AUTH" : "VERTEX_API",
@@ -927,13 +907,7 @@ async function listGeminiModels(apiKey = "") {
     } catch {
       throw new AppError("無法連線到 Gemini API，請檢查網路後再試", { code: "GEMINI_NETWORK" });
     }
-    const text = await response.text();
-    let data = {};
-    try {
-      data = text ? JSON.parse(text) : {};
-    } catch {
-      data = { error: { message: text } };
-    }
+    const data = await readJsonResponse(response);
     if (!response.ok) {
       const code = [400, 401, 403].includes(response.status) ? "GEMINI_AUTH" : "GEMINI_API";
       throw new AppError(errorMessage(data, `Gemini API 錯誤 ${response.status}`), {
