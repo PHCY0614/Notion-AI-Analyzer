@@ -2523,12 +2523,15 @@ async function processOne() {
   return processingPromise;
 }
 
-async function saveSettings(settings) {
-  const current = await readConfig();
+function resolveNotionTarget(settings, current) {
   const notionTarget = String(settings.notionTarget ?? current.notionTarget).trim();
   if (notionTarget && !S.extractNotionId(notionTarget)) {
     throw new AppError("Notion 資料庫網址或 Data Source ID 格式不正確", { code: "NOTION_TARGET_INVALID" });
   }
+  return notionTarget;
+}
+
+function resolveProviderSelection(settings, current) {
   const aiProvider = normalizeAiProvider(settings.aiProvider ?? current.aiProvider);
   const geminiModel = S.normalizeModelName(settings.geminiModel ?? current.geminiModel) || G.DEFAULT_MODEL;
   const openRouterModel = String(settings.openRouterModel ?? current.openRouterModel ?? "openrouter/free").trim();
@@ -2549,6 +2552,17 @@ async function saveSettings(settings) {
     });
   }
   const vertexModel = S.normalizeModelName(settings.vertexModel ?? current.vertexModel) || "gemini-3.5-flash-lite";
+  return {
+    aiProvider,
+    geminiModel,
+    knownFreeOpenRouterModels,
+    openRouterModel,
+    openRouterModelIsFree,
+    vertexModel
+  };
+}
+
+function resolvePromptSettings(settings, current) {
   const outputSpec = P.normalizeOutputSpec(settings.outputSpec ?? current.outputSpec);
   const analysisPrompt = settings.analysisPrompt === undefined
     ? S.cleanText(current.analysisPrompt)
@@ -2558,9 +2572,10 @@ async function saveSettings(settings) {
     : Boolean(settings.analysisPromptCustomized) && Boolean(analysisPrompt);
   const timeoutValue = Number(settings.requestTimeoutMinutes ?? current.requestTimeoutMinutes);
   const requestTimeoutMinutes = [0, 3, 5, 10].includes(timeoutValue) ? timeoutValue : 5;
-  const currentTargetId = compactNotionId(S.extractNotionId(current.notionTarget || current.dataSourceId));
-  const nextTargetId = compactNotionId(S.extractNotionId(notionTarget));
-  const targetChanged = nextTargetId !== currentTargetId;
+  return { analysisPrompt, analysisPromptCustomized, outputSpec, requestTimeoutMinutes };
+}
+
+function resolveTopicPreferences(settings, current, targetChanged, nextTargetId) {
   const preferExistingTopicsByDataSource = normalizeTopicOrganizerPreferences(
     current.preferExistingTopicsByDataSource
   );
@@ -2574,6 +2589,10 @@ async function saveSettings(settings) {
   if (!targetChanged && current.dataSourceId) {
     preferExistingTopicsByDataSource[compactNotionId(current.dataSourceId)] = preferExistingTopics;
   }
+  return { preferExistingTopics, preferExistingTopicsByDataSource };
+}
+
+function assertDatabaseChangeAllowed(targetChanged) {
   if (targetChanged && stateCache?.topicReview) {
     throw new AppError("目前有一篇文章等待確認新主題，請先完成確認再更換 Notion 資料庫", {
       code: "TOPIC_REVIEW_PENDING"
@@ -2584,28 +2603,32 @@ async function saveSettings(settings) {
       code: "DATABASE_CHANGE_WHILE_RUNNING"
     });
   }
+}
+
+function buildNextConfig(settings, current, resolved) {
+  const { notionTarget, preferExistingTopicsByDataSource, promptSettings, provider, targetChanged } = resolved;
   const next = {
     ...current,
     allowTopicProposals: true,
     excludedPersonTerms: settings.excludedPersonTerms === undefined
       ? normalizeExcludedPersonTerms(current.excludedPersonTerms)
       : normalizeExcludedPersonTerms(settings.excludedPersonTerms),
-    analysisPrompt,
-    analysisPromptCustomized,
+    analysisPrompt: promptSettings.analysisPrompt,
+    analysisPromptCustomized: promptSettings.analysisPromptCustomized,
     promptBaseVersion: CURRENT_PROMPT_VERSION,
-    aiProvider,
+    aiProvider: provider.aiProvider,
     notionTarget,
-    geminiModel,
-    openRouterModel,
-    openRouterFreeModelIds: [...knownFreeOpenRouterModels].slice(0, 500),
-    openRouterPaidConfirmedModel: openRouterModelIsFree ? "" : openRouterModel,
-    vertexModel,
+    geminiModel: provider.geminiModel,
+    openRouterModel: provider.openRouterModel,
+    openRouterFreeModelIds: [...provider.knownFreeOpenRouterModels].slice(0, 500),
+    openRouterPaidConfirmedModel: provider.openRouterModelIsFree ? "" : provider.openRouterModel,
+    vertexModel: provider.vertexModel,
     rememberGeminiKey: Boolean(settings.rememberGeminiKey),
     rememberOpenRouterKey: Boolean(settings.rememberOpenRouterKey),
     rememberVertexKey: Boolean(settings.rememberVertexKey),
     rememberNotionToken: Boolean(settings.rememberNotionToken),
-    requestTimeoutMinutes,
-    outputSpec,
+    requestTimeoutMinutes: promptSettings.requestTimeoutMinutes,
+    outputSpec: promptSettings.outputSpec,
     preferExistingTopicsByDataSource,
     topicAliases: targetChanged ? {} : normalizeTopicAliases(current.topicAliases),
     topicPageResolutions: targetChanged ? {} : normalizeTopicPageResolutions(current.topicPageResolutions),
@@ -2615,34 +2638,36 @@ async function saveSettings(settings) {
     databaseId: targetChanged ? "" : current.databaseId
   };
   delete next.autoSelectHighConfidence;
-  const [hasNotionToken, hasGeminiKey, hasVertexKey, hasOpenRouterKey] = await Promise.all([
-    storeSecret(NOTION_TOKEN_KEY, settings.notionToken, next.rememberNotionToken),
-    storeSecret(GEMINI_KEY_KEY, settings.geminiKey, next.rememberGeminiKey),
-    storeSecret(VERTEX_KEY_KEY, settings.vertexKey, next.rememberVertexKey),
-    storeSecret(OPENROUTER_KEY_KEY, settings.openRouterKey, next.rememberOpenRouterKey)
-  ]);
-  await writeConfig(next);
-  let clearedQueueCount = 0;
-  if (targetChanged && stateCache) {
-    clearedQueueCount = stateCache.queue.length;
-    preparedDataSourceId = "";
-    stateCache.databaseCheck = null;
-    stateCache.queue = [];
-    stateCache.failed = [];
-    stateCache.recent = [];
-    stateCache.knownPending = null;
-    stateCache.pendingScan = null;
-    stateCache.lastScanAt = "";
-    stateCache.lastError = "";
-    stateCache.mode = "idle";
-    stateCache.paused = true;
-    stateCache.running = false;
-    stateCache.stopRequested = false;
-    stateCache.stage = null;
-    stateCache.topicOrganizer = null;
-    stateCache.topicRollback = null;
-    await persistState();
-  }
+  return next;
+}
+
+async function resetStateForDatabaseChange() {
+  if (!stateCache) return 0;
+  const clearedQueueCount = stateCache.queue.length;
+  preparedDataSourceId = "";
+  stateCache.databaseCheck = null;
+  stateCache.queue = [];
+  stateCache.failed = [];
+  stateCache.recent = [];
+  stateCache.knownPending = null;
+  stateCache.pendingScan = null;
+  stateCache.lastScanAt = "";
+  stateCache.lastError = "";
+  stateCache.mode = "idle";
+  stateCache.paused = true;
+  stateCache.running = false;
+  stateCache.stopRequested = false;
+  stateCache.stage = null;
+  stateCache.topicOrganizer = null;
+  stateCache.topicRollback = null;
+  await persistState();
+  return clearedQueueCount;
+}
+
+function buildSaveResponse(next, resolved) {
+  const { clearedQueueCount, preferExistingTopics, provider, secrets, targetChanged } = resolved;
+  const { aiProvider, geminiModel, openRouterModel, openRouterModelIsFree, vertexModel } = provider;
+  const { hasGeminiKey, hasNotionToken, hasOpenRouterKey, hasVertexKey } = secrets;
   return {
     ...next,
     preferExistingTopics,
@@ -2656,6 +2681,45 @@ async function saveSettings(settings) {
     databaseChanged: targetChanged,
     clearedQueueCount
   };
+}
+
+async function saveSettings(settings) {
+  const current = await readConfig();
+  const notionTarget = resolveNotionTarget(settings, current);
+  const provider = resolveProviderSelection(settings, current);
+  const promptSettings = resolvePromptSettings(settings, current);
+  const currentTargetId = compactNotionId(S.extractNotionId(current.notionTarget || current.dataSourceId));
+  const nextTargetId = compactNotionId(S.extractNotionId(notionTarget));
+  const targetChanged = nextTargetId !== currentTargetId;
+  const { preferExistingTopics, preferExistingTopicsByDataSource } = resolveTopicPreferences(
+    settings,
+    current,
+    targetChanged,
+    nextTargetId
+  );
+  assertDatabaseChangeAllowed(targetChanged);
+  const next = buildNextConfig(settings, current, {
+    notionTarget,
+    preferExistingTopicsByDataSource,
+    promptSettings,
+    provider,
+    targetChanged
+  });
+  const [hasNotionToken, hasGeminiKey, hasVertexKey, hasOpenRouterKey] = await Promise.all([
+    storeSecret(NOTION_TOKEN_KEY, settings.notionToken, next.rememberNotionToken),
+    storeSecret(GEMINI_KEY_KEY, settings.geminiKey, next.rememberGeminiKey),
+    storeSecret(VERTEX_KEY_KEY, settings.vertexKey, next.rememberVertexKey),
+    storeSecret(OPENROUTER_KEY_KEY, settings.openRouterKey, next.rememberOpenRouterKey)
+  ]);
+  await writeConfig(next);
+  const clearedQueueCount = targetChanged ? await resetStateForDatabaseChange() : 0;
+  return buildSaveResponse(next, {
+    clearedQueueCount,
+    preferExistingTopics,
+    provider,
+    secrets: { hasGeminiKey, hasNotionToken, hasOpenRouterKey, hasVertexKey },
+    targetChanged
+  });
 }
 
 async function getConfigForUi() {
