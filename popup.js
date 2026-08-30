@@ -45,7 +45,7 @@ const buttons = {
   approveTopic: document.querySelector("#approve-topic"),
   replaceTopic: document.querySelector("#replace-topic"),
   useCustomTopic: document.querySelector("#use-custom-topic"),
-  discardTopic: document.querySelector("#discard-topic")
+  skipTopic: document.querySelector("#skip-topic")
 };
 const organizeTopicsButton = document.querySelector("#organize-topics");
 let configured = false;
@@ -277,7 +277,7 @@ function renderTopicReview(review) {
   replacementTopicDropdown.sync();
   buttons.replaceTopic.disabled = actionBusy || options.length === 0;
   buttons.useCustomTopic.disabled = actionBusy || !customTopic.value.trim();
-  buttons.discardTopic.disabled = actionBusy || review.canDiscard === false;
+  buttons.skipTopic.disabled = actionBusy || review.canDiscard === false;
   buttons.approveTopic.disabled = actionBusy;
 }
 
@@ -410,7 +410,7 @@ async function refresh() {
  * Sends one command, disabling toolbar buttons until refresh. Re-inspects
  * the tab after REVIEW_CURRENT_PAGE_TOPICS or RESOLVE_TOPIC_REVIEW. Current
  * button: stop, review, reanalyze (force), or analyze/retry via
- * REANALYZE_PAGE. #discard-topic sends RESOLVE_TOPIC_REVIEW action skip.
+ * REANALYZE_PAGE. #skip-topic sends RESOLVE_TOPIC_REVIEW action skip.
  */
 async function runAction(type, extra = {}) {
   if (actionBusy) return;
@@ -474,7 +474,7 @@ buttons.useCustomTopic.addEventListener("click", () => runAction("RESOLVE_TOPIC_
   customTopic: customTopic.value,
   rememberMapping: rememberTopicMapping.checked
 }));
-buttons.discardTopic.addEventListener("click", () => runAction("RESOLVE_TOPIC_REVIEW", { action: "skip" }));
+buttons.skipTopic.addEventListener("click", () => runAction("RESOLVE_TOPIC_REVIEW", { action: "skip" }));
 customTopic.addEventListener("input", () => {
   buttons.useCustomTopic.disabled = actionBusy || !customTopic.value.trim();
 });

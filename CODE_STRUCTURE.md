@@ -32,7 +32,7 @@ Libraries attach an IIFE to `globalThis` (`AnalyzerShared`, `AnalyzerPrompt`, `A
 | `popup.js` | Popup: inspect current tab, poll status, toolbar, recent list, single-page topic review UI. |
 | `options.js` | Settings form, provider/model discovery UI, prompt/output-spec editors, topic organizer cards, dictionary import/export. |
 | `ui-select.js` | Shared `AnalyzerSelect.enhance` custom select. Popup and options pass different listener/native-state options. |
-| `popup.html` / `popup.css` | Popup chrome. `#discard-topic` label is 「這次暫不處理」. |
+| `popup.html` / `popup.css` | Popup chrome. `#skip-topic` label is 「這次暫不處理」. |
 | `options.html` / `options.css` | Settings and organizer page. |
 | `AGENTS.md` | Behavioural stability rules for refactors. |
 | `PRIVACY.md` / `PRIVACY.zh-TW.md` | English and Traditional Chinese privacy and data-flow documentation. |
@@ -151,11 +151,11 @@ Article analysis never selects confirmed taxonomy names. Batch omits `AI 主題`
 
 | Surface | Control | Message action | Effect |
 | --- | --- | --- | --- |
-| Popup `#discard-topic` 「這次暫不處理」 | `RESOLVE_TOPIC_REVIEW` `skip` | Keep the name in `AI 暫定主題`; do not add `AI 主題`. |
+| Popup `#skip-topic` 「這次暫不處理」 | `RESOLVE_TOPIC_REVIEW` `skip` | Keep the name in `AI 暫定主題`; do not add `AI 主題`. |
 | Options unclassified 「永久捨棄」 | `RESOLVE_ORGANIZER_UNCLASSIFIED` `discard` | Remove the provisional from affected pages; record `discardedTopicNames`; do not add `AI 主題`. |
 | Options unclassified skip | `skip` | Local organizer session only; Notion unchanged. |
 
-Popup `#discard-topic` stays enabled unless `canDiscard === false`; that flag still gates the skip button despite the id.
+Popup `#skip-topic` stays enabled unless `canDiscard === false`. That public-status flag name is unchanged.
 
 ## Topic organizer
 

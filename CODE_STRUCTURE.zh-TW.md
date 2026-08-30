@@ -32,7 +32,7 @@ background.js service worker
 | `popup.js` | Popup：檢查目前分頁、輪詢狀態、工具列、近期紀錄、單篇主題確認 UI。 |
 | `options.js` | 設定表單、服務商／模型探索 UI、提示詞／輸出規格編輯、主題整理卡片、字典匯入／匯出。 |
 | `ui-select.js` | 共用 `AnalyzerSelect.enhance` 自訂選單。Popup 與 options 傳入不同的 listener／native-state 選項。 |
-| `popup.html`／`popup.css` | Popup 畫面。`#discard-topic` 文案是「這次暫不處理」。 |
+| `popup.html`／`popup.css` | Popup 畫面。`#skip-topic` 文案是「這次暫不處理」。 |
 | `options.html`／`options.css` | 設定與主題整理頁。 |
 | `AGENTS.md` | 重構時的行為穩定規則。 |
 | `PRIVACY.md` / `PRIVACY.zh-TW.md` | 英文與繁中隱私及資料流說明。 |
@@ -151,11 +151,11 @@ Gemini 與 Vertex 的 HTTP 走 `googleGenerativeRequest` 與薄包裝。OpenRout
 
 | 畫面 | 控制項 | 訊息 action | 效果 |
 | --- | --- | --- | --- |
-| Popup `#discard-topic`「這次暫不處理」 | `RESOLVE_TOPIC_REVIEW` `skip` | 名稱留在 `AI 暫定主題`；不加入 `AI 主題`。 |
+| Popup `#skip-topic`「這次暫不處理」 | `RESOLVE_TOPIC_REVIEW` `skip` | 名稱留在 `AI 暫定主題`；不加入 `AI 主題`。 |
 | Options 未分類「永久捨棄」 | `RESOLVE_ORGANIZER_UNCLASSIFIED` `discard` | 從受影響頁面移除該暫定主題；記入 `discardedTopicNames`；不加入 `AI 主題`。 |
 | Options 未分類暫時跳過 | `skip` | 只改本機整理工作階段；Notion 不變。 |
 
-Popup 的 `#discard-topic` 除非 `canDiscard === false` 否則維持可按；這個旗標雖然叫 discard，實際仍是在閘 skip 按鈕。
+Popup 的 `#skip-topic` 除非 `canDiscard === false` 否則維持可按。這個公開狀態旗標名稱不變。
 
 ## 主題整理
 
