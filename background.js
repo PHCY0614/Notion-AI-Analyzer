@@ -120,7 +120,7 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function normalizeExcludedPersonTerms(value) {
+function normalizeShortNameList(value) {
   const source = Array.isArray(value)
     ? value
     : String(value ?? "").split(/[\n\r,，、]+/u);
@@ -133,6 +133,10 @@ function normalizeExcludedPersonTerms(value) {
     result.push(name);
     return result;
   }, []);
+}
+
+function normalizeExcludedPersonTerms(value) {
+  return normalizeShortNameList(value);
 }
 
 function normalizeTopicAliases(value) {
@@ -218,12 +222,12 @@ function normalizeTopicReview(review) {
     : Array.isArray(result.topic_candidates) ? result.topic_candidates : legacyCandidate(result);
   return {
     ...review,
-    approvedNewTopics: normalizeExcludedPersonTerms(review.approvedNewTopics ?? []),
+    approvedNewTopics: normalizeShortNameList(review.approvedNewTopics ?? []),
     candidateTotal: Number(review.candidateTotal) || remainingCandidates.length,
     decisions: Array.isArray(review.decisions) ? review.decisions : [],
     remainingCandidates,
-    skippedCandidates: normalizeExcludedPersonTerms(review.skippedCandidates ?? []),
-    originalFinalTopics: normalizeExcludedPersonTerms(review.originalFinalTopics ?? []),
+    skippedCandidates: normalizeShortNameList(review.skippedCandidates ?? []),
+    originalFinalTopics: normalizeShortNameList(review.originalFinalTopics ?? []),
     selectedExistingTopics: Array.isArray(review.selectedExistingTopics)
       ? review.selectedExistingTopics
       : Array.isArray(result.ai_topics) ? result.ai_topics : []
