@@ -2,6 +2,8 @@
 
 A Chrome extension that uses Google AI Studio, Vertex AI, or OpenRouter to analyse plain text from Notion pages and produce Traditional Chinese titles, topics, keywords, and summaries.
 
+The current user interface is designed for users in Taiwan and uses Traditional Chinese with Taiwan-specific terminology and language conventions. The codebase and developer-facing documentation are maintained primarily in English.
+
 Traditional Chinese (Taiwan): [`README.zh-TW.md`](README.zh-TW.md)
 
 ## Highlights in this version
@@ -63,7 +65,7 @@ The Notion Integration must already be invited to the target database.
 
 Uses a Gemini API key. Usage here does not draw down the Google Cloud US$300 trial credit. The options page links to AI Studio usage and rate-limit documentation.
 
-Content and responses submitted to Google AI Studio / Gemini API unpaid service may be used by Google to improve products and machine-learning technology (including model training) and may be human-reviewed. Do not submit sensitive, confidential, or personal information. If the project has Cloud Billing enabled, paid-service data terms may apply; the [Gemini API Additional Terms of Service](https://ai.google.dev/gemini-api/terms) govern.
+Content and responses submitted through Google AI Studio or the Gemini API as an unpaid service may be used by Google to improve and develop its products, services, and machine-learning technologies, and may be human-reviewed. Do not submit sensitive, confidential, or personal information. If the project has Cloud Billing enabled, paid-service data terms may apply; the [Gemini API Additional Terms of Service](https://ai.google.dev/gemini-api/terms) govern.
 
 ### Vertex AI
 
@@ -73,11 +75,11 @@ Uses a Google Cloud API key with Vertex AI enabled. Eligible usage may count aga
 
 Model listing includes only concrete models with text output, explicit Structured Outputs support, and enough context for article analysis. It excludes `openrouter/free` random routing and image, audio/video, embedding, rerank, and code-specialist models. Preview / experimental models are kept. Free and paid models are labelled; paid models require a cost-confirmation checkbox.
 
-## Analysis flow
+## Batch analysis flow
 
 1. Read `待分析` pages from oldest to newest by Notion `created_time`.
 2. Read plain-text blocks.
-3. One AI call produces title, summary, keywords, and provisional topics.
+3. For a typical article, one main AI call produces the title, summary, keywords, and provisional topics. Long articles may first use chunk-note calls and then a synthesis call.
 4. Update only `AI 標題`, `AI 摘要`, `AI 關鍵字`, `AI 暫定主題`, and `整理狀態`. Existing `AI 主題` is left as-is.
 5. Status becomes `待主題整理`.
 6. Batch analysis continues to the next page.
@@ -86,7 +88,7 @@ Whether or not a topic dictionary exists, the dictionary and existing Notion opt
 
 ### Analyse the current page
 
-Open the extension on an article page in the configured database and click 「分析目前頁面」. The Page ID is taken from the current tab URL. Source URLs, post numbers, capture keys, and local queue order are not required. If the page already has AI content, you are asked before it is updated. After analysis you can accept a candidate, map it to an existing topic, create a custom topic of at most 5 characters, or skip it for now; confirmed `AI 主題` is then updated by union. Unresolved skip items keep `AI 暫定主題`. The field is cleared only after everything is resolved and status becomes `已分析`.
+Open the extension on an article page in the configured database and click 「分析目前頁面」. The Page ID is taken from the current tab URL. Source URLs, post numbers, capture keys, and local queue order are not required. If the page already has AI content, the confirmation explains that reanalysis will regenerate the AI analysis, clear all existing confirmed `AI 主題`, and restart topic confirmation. After analysis you can accept a candidate, map it to an existing topic, create a custom topic of at most 5 characters, or skip it for now. Topics confirmed in this new review are unioned into `AI 主題`. Candidates skipped for now remain in `AI 暫定主題` until they are resolved. The field is cleared only after everything is resolved and status becomes `已分析`.
 
 ## Topic organizing
 
