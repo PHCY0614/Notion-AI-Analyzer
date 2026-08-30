@@ -2308,6 +2308,42 @@ async function resetPageToPending(item, token) {
   }
 }
 
+async function requeueAndPause(item, message, token, { resetPage } = {}) {
+  stateCache.queue = uniqueItems([item, ...stateCache.queue]);
+  stateCache.paused = true;
+  stateCache.lastError = message;
+  if (resetPage) await resetPageToPending(item, token);
+}
+
+async function recordFailure(item, error, token) {
+  let statusError = "";
+  if (token) {
+    try {
+      await notionRequest(`/v1/pages/${item.id}`, {
+        method: "PATCH",
+        body: N.statusUpdatePayload(N.STATUS.failed),
+        retrySafe: true,
+        token
+      });
+    } catch (failureStatusError) {
+      statusError = `；且無法寫入分析失敗狀態：${failureStatusError.message}`;
+    }
+  } else {
+    statusError = "；且目前沒有 Notion Token，無法寫入分析失敗狀態";
+  }
+  const failure = {
+    ...item,
+    code: error.code || "APP_ERROR",
+    diagnostic: error.diagnostic || null,
+    error: `${S.truncateMessage(error.message || "未知錯誤")}${statusError}`,
+    failedAt: new Date().toISOString()
+  };
+  stateCache.failed = [failure, ...stateCache.failed.filter(entry => entry.id !== item.id)].slice(0, MAX_RECENT);
+  stateCache.recent = [{ ...failure, outcome: "failed" }, ...stateCache.recent.filter(entry => entry.id !== item.id)].slice(0, MAX_RECENT);
+  stateCache.lastError = failure.error;
+  decrementKnownPending(item);
+}
+
 async function processItem(item) {
   let token = "";
   const controller = new AbortController();
@@ -2410,10 +2446,7 @@ async function processItem(item) {
     decrementKnownPending(item);
   } catch (error) {
     if (isAbort(error) || stateCache.stopRequested) {
-      stateCache.queue = uniqueItems([item, ...stateCache.queue]);
-      stateCache.paused = true;
-      stateCache.lastError = "已停止；目前文章已放回待分析佇列。";
-      await resetPageToPending(item, token);
+      await requeueAndPause(item, "已停止；目前文章已放回待分析佇列。", token, { resetPage: true });
     } else if (error.code === "QUEUE_SOURCE_MISMATCH") {
       stateCache.queue = [];
       stateCache.failed = [];
@@ -2423,55 +2456,36 @@ async function processItem(item) {
       stateCache.mode = "paused";
       stateCache.lastError = "已攔截先前資料庫留下的本機佇列，沒有寫入任何頁面。請按「掃描資料庫」後再開始分析。";
     } else if (REQUEUE_TIMEOUT_CODES.has(error.code)) {
-      stateCache.queue = uniqueItems([item, ...stateCache.queue]);
-      stateCache.paused = true;
-      stateCache.lastError = `${S.truncateMessage(error.message)}。文章已放回待分析；請自行決定重試或更換模型。`;
-      await resetPageToPending(item, token);
+      await requeueAndPause(
+        item,
+        `${S.truncateMessage(error.message)}。文章已放回待分析；請自行決定重試或更換模型。`,
+        token,
+        { resetPage: true }
+      );
     } else if (RATE_LIMIT_CODES.has(error.code)) {
-      stateCache.queue = uniqueItems([item, ...stateCache.queue]);
-      stateCache.paused = true;
       const wait = error.retryAfter ? `，建議 ${error.retryAfter} 秒後再繼續` : "，請稍後再繼續";
-      stateCache.lastError = `API 已達速率或額度限制${wait}：${S.truncateMessage(error.message)}`;
-      await resetPageToPending(item, token);
+      await requeueAndPause(
+        item,
+        `API 已達速率或額度限制${wait}：${S.truncateMessage(error.message)}`,
+        token,
+        { resetPage: true }
+      );
     } else if (SETUP_ERROR_CODES.has(error.code)) {
-      stateCache.queue = uniqueItems([item, ...stateCache.queue]);
-      stateCache.paused = true;
-      stateCache.lastError = `設定或授權需要修正，佇列已暫停：${S.truncateMessage(error.message)}`;
-      if (!["NOTION_AUTH", "NOTION_TOKEN_MISSING"].includes(error.code)) {
-        await resetPageToPending(item, token);
-      }
+      await requeueAndPause(
+        item,
+        `設定或授權需要修正，佇列已暫停：${S.truncateMessage(error.message)}`,
+        token,
+        { resetPage: !["NOTION_AUTH", "NOTION_TOKEN_MISSING"].includes(error.code) }
+      );
     } else if (error.code === "OPENROUTER_MODEL_INCOMPATIBLE") {
-      stateCache.queue = uniqueItems([item, ...stateCache.queue]);
-      stateCache.paused = true;
-      stateCache.lastError = `OpenRouter 模型不相容，佇列已暫停：${S.truncateMessage(error.message)}`;
-      await resetPageToPending(item, token);
+      await requeueAndPause(
+        item,
+        `OpenRouter 模型不相容，佇列已暫停：${S.truncateMessage(error.message)}`,
+        token,
+        { resetPage: true }
+      );
     } else {
-      let statusError = "";
-      if (token) {
-        try {
-          await notionRequest(`/v1/pages/${item.id}`, {
-            method: "PATCH",
-            body: N.statusUpdatePayload(N.STATUS.failed),
-            retrySafe: true,
-            token
-          });
-        } catch (failureStatusError) {
-          statusError = `；且無法寫入分析失敗狀態：${failureStatusError.message}`;
-        }
-      } else {
-        statusError = "；且目前沒有 Notion Token，無法寫入分析失敗狀態";
-      }
-      const failure = {
-        ...item,
-        code: error.code || "APP_ERROR",
-        diagnostic: error.diagnostic || null,
-        error: `${S.truncateMessage(error.message || "未知錯誤")}${statusError}`,
-        failedAt: new Date().toISOString()
-      };
-      stateCache.failed = [failure, ...stateCache.failed.filter(entry => entry.id !== item.id)].slice(0, MAX_RECENT);
-      stateCache.recent = [{ ...failure, outcome: "failed" }, ...stateCache.recent.filter(entry => entry.id !== item.id)].slice(0, MAX_RECENT);
-      stateCache.lastError = failure.error;
-      decrementKnownPending(item);
+      await recordFailure(item, error, token);
     }
   } finally {
     if (activeAbortController === controller) activeAbortController = null;
