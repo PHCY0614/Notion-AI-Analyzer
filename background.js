@@ -1130,8 +1130,8 @@ function topicDictionaryLookup(config = {}, allowedTargets = null) {
   return lookup;
 }
 
-function pageResolution(config, pageId, candidate) {
-  return S.cleanText(normalizeTopicPageResolutions(config.topicPageResolutions)?.[pageId]?.[N.topicKey(candidate)]);
+function pageResolution(resolutions, pageId, candidate) {
+  return S.cleanText(resolutions?.[pageId]?.[N.topicKey(candidate)]);
 }
 
 function topicOrganizerCandidates(pages, options = [], config = {}, limit = TOPIC_ORGANIZER_BATCH_LIMIT) {
@@ -1139,13 +1139,14 @@ function topicOrganizerCandidates(pages, options = [], config = {}, limit = TOPI
   const existing = new Map(validTopicOptions(options).map(option => [N.topicKey(option.name), option.name]));
   const dictionary = topicDictionaryLookup(config, existing.keys());
   const discardedKeys = new Set(normalizeDiscardedTopicNames(config.discardedTopicNames).map(N.topicKey));
+  const resolutions = normalizeTopicPageResolutions(config.topicPageResolutions);
   for (const page of pages ?? []) {
     const finalKeys = new Set((page.aiTopics ?? []).map(N.topicKey));
     for (const rawName of uniqueTopicNames(page.provisionalTopics ?? [])) {
       const name = S.cleanText(rawName);
       const key = N.topicKey(name);
       if (!key) continue;
-      const pageTarget = pageResolution(config, page.id, name);
+      const pageTarget = pageResolution(resolutions, page.id, name);
       const preferredStandard = existing.get(key)
         || (existing.has(N.topicKey(pageTarget)) ? existing.get(N.topicKey(pageTarget)) : "")
         || dictionary.get(key)
