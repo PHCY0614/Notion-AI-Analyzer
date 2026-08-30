@@ -945,6 +945,16 @@ async function listGeminiModels(apiKey = "") {
 }
 
 // ==== Notion schema and scanning ====
+/**
+ * Resolves a Notion database URL, database UUID, or data source UUID to one
+ * data source. extractNotionId takes a UUID from notionTarget or the stored
+ * dataSourceId (hyphenated or compact). GET /v1/data_sources/{id} first; a
+ * 404 means treat the same UUID as a database and GET /v1/databases/{id}.
+ * A database must have exactly one data_sources entry or this throws
+ * DATA_SOURCE_MISSING / MULTIPLE_DATA_SOURCES (paste the Data Source ID).
+ * Other API errors are rethrown. GET only: no schema PATCH. Returns the
+ * data source plus dataSourceId and databaseId.
+ */
 async function resolveDataSource(config, token) {
   const rawId = S.extractNotionId(config.notionTarget || config.dataSourceId);
   if (!rawId) {
@@ -976,6 +986,18 @@ async function resolveDataSource(config, token) {
   return { dataSource, dataSourceId: dataSource.id, databaseId: database.id };
 }
 
+/**
+ * Makes the configured data source usable for analysis. Prefers GET of the
+ * stored dataSourceId; on 404 or a missing id, calls resolveDataSource. Any
+ * schemaPlan error throws before PATCH: missing 整理狀態, a non-select
+ * 整理狀態, a select without 待分析, or a wrong type on AI 標題 / AI 主題 /
+ * AI 暫定主題 / AI 關鍵字 / AI 摘要. Those failures block analysis. Missing
+ * analysis properties other than 整理狀態 may be PATCHed in. If 整理狀態
+ * already has 待分析, missing other status options may be PATCHed while
+ * existing option ids are kept; 整理狀態 is never created or type-converted
+ * here. Copies preferExistingTopics from the notionTarget UUID key onto the
+ * data source key, then writeConfig with resolved ids. Not read-only.
+ */
 async function ensureSchema(config, token) {
   let resolved;
   if (config.dataSourceId) {
@@ -1018,6 +1040,15 @@ async function ensureSchema(config, token) {
   return { config: nextConfig, dataSource, plan };
 }
 
+/**
+ * Shared credentials/config/schema gate for scans, queue start, organizer
+ * apply, page inspection, and connection tests. Requires a Notion token,
+ * reads config, then ensureSchema (may PATCH missing schema and persists
+ * resolved ids). On NOTION_STATUS_FIELD_MISSING, NOTION_STATUS_FIELD_TYPE,
+ * or NOTION_PENDING_OPTION_MISSING, records databaseCheck before rethrowing so
+ * the UI can show the 整理狀態 setup failure. Other setup errors propagate
+ * without that write. Sets preparedDataSourceId on success. Not read-only.
+ */
 async function readyNotion() {
   const token = await requireNotionToken();
   const config = await readConfig();
@@ -2702,6 +2733,13 @@ async function processOne() {
 }
 
 // ==== Settings persistence ====
+/**
+ * Settings-save target string. Trims the submitted or current notionTarget.
+ * A non-empty value must contain a UUID (database URL, database id, or data
+ * source id); otherwise NOTION_TARGET_INVALID. Empty is allowed and does
+ * not call Notion. Compact UUID comparison for a database change happens in
+ * saveSettings, not here.
+ */
 function resolveNotionTarget(settings, current) {
   const notionTarget = String(settings.notionTarget ?? current.notionTarget).trim();
   if (notionTarget && !S.extractNotionId(notionTarget)) {
@@ -2771,6 +2809,12 @@ function resolveTopicPreferences(settings, current, targetChanged, nextTargetId)
   return { preferExistingTopics, preferExistingTopicsByDataSource };
 }
 
+/**
+ * Blocks a Notion-target UUID change while a single-page topicReview is open
+ * (TOPIC_REVIEW_PENDING) or while analysis has running/current
+ * (DATABASE_CHANGE_WHILE_RUNNING). Does not mutate state. Must pass before
+ * secrets or config are written.
+ */
 function assertDatabaseChangeAllowed(targetChanged) {
   if (targetChanged && stateCache?.topicReview) {
     throw new AppError("目前有一篇文章等待確認新主題，請先完成確認再更換 Notion 資料庫", {
@@ -2820,6 +2864,15 @@ function buildNextConfig(settings, current, resolved) {
   return next;
 }
 
+/**
+ * After a saved target UUID change, drops work bound to the previous
+ * database: queue, failed, recent, pending scan, organizer, rollback,
+ * databaseCheck, and in-flight flags. Topic-resolution config (dictionary,
+ * aliases, page resolutions, discardedTopicNames, stored ids) is cleared
+ * on the next config object by saveSettings, not here. Does not clear
+ * topicReview; a change is refused while a review is open. persistState
+ * before returning the previous queue length.
+ */
 async function resetStateForDatabaseChange() {
   if (!stateCache) return 0;
   const clearedQueueCount = stateCache.queue.length;
@@ -2862,6 +2915,19 @@ function buildSaveResponse(next, resolved) {
   };
 }
 
+/**
+ * Persists options-page settings. Guard order: parse notionTarget, provider
+ * and model (MODEL_INVALID, OPENROUTER_PAID_CONFIRMATION_REQUIRED), prompt
+ * and timeout, then assertDatabaseChangeAllowed. All of those must pass
+ * before storeSecret or writeConfig. A compact-UUID change versus the current
+ * notionTarget or dataSourceId is a database change: the next config clears
+ * dataSourceId, databaseId, topicAliases, topicPageResolutions,
+ * discardedTopicNames, and topicDictionary so another database cannot reuse
+ * that taxonomy or queue; then resetStateForDatabaseChange. Topic
+ * preferences stay keyed per data source / target UUID and are not wiped.
+ * Does not call Notion or ensureSchema; schema is checked later by
+ * readyNotion. Response includes has*Key booleans, not secret values.
+ */
 async function saveSettings(settings) {
   const current = await readConfig();
   const notionTarget = resolveNotionTarget(settings, current);
@@ -2902,6 +2968,14 @@ async function saveSettings(settings) {
 }
 
 // ==== Settings UI and connection diagnostics ====
+/**
+ * Options/popup config payload. Reads stored config and whether secrets exist.
+ * Does not return Notion token or AI key values; exposes hasNotionToken and
+ * has*Key booleans. Spreads ids, models, prompt flags, topic dictionary,
+ * discardedTopicNames, and preferExistingTopicsByDataSource, and adds
+ * preferExistingTopics for the current data source, prompt preview, and
+ * default-prompt drift. Does not call Notion or AI.
+ */
 async function getConfigForUi() {
   const config = await readConfig();
   const [notionToken, geminiKey, vertexKey, openRouterKey] = await Promise.all([
@@ -2936,6 +3010,15 @@ async function getConfigForUi() {
   };
 }
 
+/**
+ * Options connection test. Goes through readyNotion, so it may PATCH missing
+ * data-source schema and persist resolved ids; not read-only. Then contacts
+ * only the configured AI provider: Vertex countTokens on the selected model,
+ * OpenRouter model list (also writeConfig of openRouterFreeModelIds), or
+ * Gemini model list. Queries whether any 待分析 page exists. No article
+ * property writes. Missing pending pages set databaseCheck NO_PENDING_PAGES
+ * with ready true and do not throw. Returns plan.added / plan.updated names.
+ */
 async function testConnections() {
   const { config, dataSource, plan, token } = await readyNotion();
   const provider = normalizeAiProvider(config.aiProvider);
