@@ -1,12 +1,16 @@
 # Privacy and data flow
 
-Version: 0.6.1
+Last updated: August 30, 2026
+
+Developed and maintained by Penny Hsieh.
+
+This extension is currently distributed through GitHub and has not been published on the Chrome Web Store.
 
 Traditional Chinese (Taiwan): [`PRIVACY.zh-TW.md`](PRIVACY.zh-TW.md)
 
 ## Data this extension reads
 
-This extension uses the Notion Integration Token you provide to access the configured Notion data source and to inspect a Notion page identified from the current tab:
+This extension must be used with the Notion web app in Google Chrome. It uses the Notion Integration Token you provide to access the configured Notion data source and to inspect a Notion page identified from the current tab that belongs to that data source:
 
 - Page ID, Notion URL, and the original page title, for the queue and recent/failed lists.
 - Plain-text blocks from the page, for article analysis.
@@ -63,3 +67,7 @@ Successful recent rows store page ID, title, URL, status, and time. Failed rows 
 ## Your responsibilities
 
 Limit which pages the Notion Integration can access. Manage API keys, quotas, and deletion in Google Cloud, AI Studio, or OpenRouter. On a shared computer, do not remember keys, and clear them when you are done.
+
+## Contact
+
+For privacy or data-handling questions, use the project’s [GitHub Issues](https://github.com/PHCY0614/Notion-AI-Analyzer/issues). Do not post API keys, Notion tokens, article content, or other private information in a public issue.
