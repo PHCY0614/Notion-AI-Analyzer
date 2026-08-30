@@ -1,55 +1,65 @@
-# 隱私與資料流說明
+# Privacy and data flow
 
-版本：0.5.11
+Version: 0.6.1
 
-## 會讀取的資料
+Traditional Chinese (Taiwan): [`PRIVACY.zh-TW.md`](PRIVACY.zh-TW.md)
 
-本工具只透過你提供的 Notion Integration Token 讀取指定資料庫中要分析的頁面：
+## Data this extension reads
 
-- 頁面 ID、Notion 網址與原始頁面標題，用於佇列和操作紀錄。
-- 頁面中的純文字區塊，用於 AI 分析。
-- `整理狀態`，用於尋找 `待分析` 或 `分析失敗` 的頁面。
-- 資料庫欄位結構，用於確認必要欄位與取得既有 `AI 主題` 選項。
-- 使用批次主題整理時，程式會查詢符合狀態的頁面，直到收集到最多 50 個去重後的暫定主題或沒有更多結果；只擷取 Page ID、`整理狀態`、`AI 暫定主題` 與 `AI 主題`，Page ID 只用於正確寫回。
-- 使用「分析目前頁面」時只讀取目前分頁的 Notion 網址以辨識 Page ID，不讀取其他分頁內容或瀏覽紀錄。
+This extension uses the Notion Integration Token you provide to access the configured Notion data source and to inspect a Notion page identified from the current tab:
 
-圖片、影片、音訊、檔案與 PDF 不會被讀成分析內容，也不會送往 AI 服務商。
+- Page ID, Notion URL, and the original page title, for the queue and recent/failed lists.
+- Plain-text blocks from the page, for article analysis.
+- `整理狀態`, to find pages in `待分析` or `分析失敗`. Topic organizing also queries `待主題整理` and `待主題確認`.
+- The data-source schema, to check required fields and to list existing confirmed AI topics (`AI 主題`) options.
+- During batch topic organizing, the extension queries matching pages until it has at most 75 distinct provisional topics (`AI 暫定主題`), or there are no more matching pages. The organizer query asks Notion to return only the `整理狀態`, `AI 暫定主題`, and `AI 主題` database properties; Page ID is used only to write back to the correct page.
+- When the popup opens or you use 「分析目前頁面」, the Chrome-side tab access reads only the current tab’s Notion URL to identify the Page ID; it does not read other tabs or browsing history. It may then inspect that page and its data-source schema through the Notion API.
 
-## 資料傳送方向
+Images, video, audio, files, and PDFs are not used as analysis input and are not sent to the AI provider.
 
-1. 擴充功能直接連接 `api.notion.com` 讀取指定頁面的文字。
-2. 純文字與使用者設定的人物及代稱排除清單，會直接送往目前選擇的 AI 服務：Google AI Studio 的 `generativelanguage.googleapis.com`、Vertex AI 的 `aiplatform.googleapis.com`，或 OpenRouter 的 `openrouter.ai`。未選擇的服務商不會收到文章。
-3. AI 回傳的 JSON 先在本機檢查格式、字數與數量。文章分析不會收到既有 `AI 主題` 或主題字典，也不會在分析階段選擇或寫入最終主題。
-4. 使用批次主題整理時，只傳送本批不重複的暫定主題名稱與可參考的既有 `AI 主題` 名稱。文章正文、頁面名稱、AI 標題、AI 摘要、AI 關鍵字、使用次數、共同出現關係與影響篇數都不會送入主題分類判斷。
-5. 合格結果由擴充功能直接寫回 `api.notion.com`。
+Chrome permissions are `storage`, `alarms`, and `activeTab`. Host permissions are limited to `https://api.notion.com/*`, `https://generativelanguage.googleapis.com/*`, `https://aiplatform.googleapis.com/*`, and `https://openrouter.ai/*`.
 
-擴充功能本身沒有自建中介伺服器。選擇 OpenRouter 時，OpenRouter 會依所選的具體模型將要求轉交底層模型供應商，因此 OpenRouter 與實際模型供應商都可能處理文章；其保存與資料使用方式依模型及帳戶設定而異。Google AI Studio 與 Vertex AI 的資料處理方式則依對應專案、方案與 Google 當下條款而異。
+## Where data is sent
 
-### Google AI Studio 未付費服務
+1. The extension calls `api.notion.com` directly to read the selected pages. The Notion token is sent in an HTTP header, not in the URL.
+2. For single-page and batch article analysis, the following are sent to the currently selected AI provider (Google AI Studio at `generativelanguage.googleapis.com`, Vertex AI at `aiplatform.googleapis.com`, or OpenRouter at `openrouter.ai`):
+   - Notion page plain text
+   - the analysis prompt you have configured
+   - the output spec
+   - the excluded-person terms list
 
-依 Google 的 Gemini API 附加服務條款，Google AI Studio／Gemini API 未付費服務提交的內容與回應，可能用於改善與開發 Google 產品、服務及機器學習技術，也可能由人工檢閱。請勿向未付費服務提交敏感、機密或個人資訊。若使用者帳戶或專案符合 Google 定義的付費服務條件，資料處理方式可能不同；請以 [Google 最新官方條款](https://ai.google.dev/gemini-api/terms) 為準。
+   Providers you did not select do not receive the article. Listing models and testing the connection send the key to the currently selected provider. The Vertex test also sends the fixed string `連線測試` and does not include a Notion page.
+3. Returned JSON is checked locally for shape, length, and counts. Article-analysis requests do not include existing confirmed AI topics (`AI 主題`) or the local topic dictionary, and the analysis step does not select confirmed `AI 主題`. Batch analysis does not write `AI 主題`. Single-page reanalysis clears confirmed AI topics and then enters the topic-confirmation flow.
+4. Batch topic organizing sends only this batch’s distinct provisional topic (`AI 暫定主題`) names and optional existing confirmed AI topic (`AI 主題`) names. Page body, page title, AI title, summary, keywords, occurrence counts, co-occurrence, and impact counts are not sent for classification.
+5. Accepted results are written back to `api.notion.com`. Testing the connection, scanning, starting a queue, or opening the popup on a Notion page may PATCH missing AI properties and remaining status options only when `整理狀態` already exists, its type is select, and it includes the `待分析` option. User-created options are not deleted or renamed.
 
-## 本機保存
+The extension developer does not operate a separate intermediary server and the extension has no analytics or telemetry. With OpenRouter, OpenRouter forwards the request to the underlying model provider for the selected model, so both OpenRouter and that provider may process the article; their retention and data-use practices depend on the selected model and account settings. Google AI Studio and Vertex AI handling depends on the project, plan, and Google’s current terms.
 
-本工具會在 Chrome 擴充功能專用儲存空間保存：
+### Google AI Studio unpaid service
 
-- 非敏感設定：Notion 目標 ID、AI 服務商與模型名稱、人物與代稱排除清單、全域與單頁主題對照記憶及是否記住金鑰。
-- 處理狀態：最新掃描的待分析頁面 ID、批次分析的本機佇列、最近結果、錯誤訊息與暫停狀態。重新掃描成功後，佇列會依 Notion 最新的「待分析」集合清除或同步，不會把已失效的舊項目繼續當成待處理文章。
-- 主題字典與整理狀態：標準主題、定義、別名、顏色、是否啟用、永久捨棄的暫定主題名稱、當批整理建議、本輪未分類／暫時跳過項目及上一次套用的回復快照。匯出字典不包含金鑰、Token 或文章正文。
-- 失敗除錯紀錄：僅在 AI 輸出失敗時保存服務商、模型名稱、停止原因、Token 用量、安全分類與每次最多 12,000 字的原始 AI 回應。紀錄不包含 API Key、Notion Token、完整原文、請求標頭或完整請求內容。
-- 金鑰：預設保存在工作階段儲存空間；只有使用者明確勾選時才保存在本機儲存空間。
+Under Google’s Gemini API Additional Terms of Service, content and responses submitted to Google AI Studio / Gemini API unpaid service may be used to improve Google products, services, and machine-learning technology, and may be human-reviewed. Do not submit sensitive, confidential, or personal information to the unpaid service. If the account or project meets Google’s paid-service conditions, handling may differ; see the [current official terms](https://ai.google.dev/gemini-api/terms).
 
-成功紀錄只包含頁面 ID、標題、網址、狀態與時間。失敗紀錄會額外保存上述有限除錯資訊，方便使用者按「複製 Log」自行檢查。按「清除清單」會一併清除詳細回應，但保留可供重試的頁面 ID 與簡短錯誤。設定頁可清除 Notion 與所有 AI 金鑰，移除擴充功能也會移除其 Chrome 儲存資料。
+## Stored locally
 
-## 不會進行的行為
+Chrome extension storage holds:
 
-- 不收集瀏覽紀錄；只在使用單頁分析時讀取目前 Notion 分頁網址以辨識頁面。
-- 不執行內容腳本。
-- 不把金鑰加入網址、原始碼、ZIP、分析紀錄或 Notion。
-- 不修改 Notion 的原始 `名稱` 或頁面正文。
-- 不刪除資料庫欄位或使用者新增的狀態選項。
-- 不執行排程式自動掃描；只有使用者按下操作按鈕才開始查詢或分析。
+- General settings: Notion target ID, AI provider and model names, excluded-person terms, analysis prompt and output spec, global and per-page topic mappings, and whether to remember keys.
+- Run state: latest scanned pending page IDs, the local batch queue, recent results, errors, and pause state. After a successful rescan, the queue is cleared or synced to Notion’s current `待分析` set so stale items are not kept as work.
+- Topic dictionary and organizer session: standard topics, definitions, aliases, colors, enabled flags, permanently discarded provisional topic names, the current suggestion batch, unclassified / temporarily skipped items, and the last apply snapshot used for rollback. Dictionary export does not include keys, tokens, or article text.
+- Failure diagnostics: only on AI output failure, provider, model name, stop reason, token usage, safety categories, and at most 12,000 characters of the raw AI response. Logs do not include API keys, the Notion token, the full source article, request headers, or the full request body.
+- Keys: the Notion token and the three AI keys each have a separate “remember” option. They are kept in session storage by default; they are stored in local extension storage only if you explicitly choose to remember them.
 
-## 使用者責任
+Successful recent rows store page ID, title, URL, status, and time. Failed rows add the limited diagnostic above so you can copy a log. 「清除清單」 clears those detailed responses but keeps page IDs and short errors needed to retry. The options page can clear Notion and all AI keys. Uninstalling the extension removes its Chrome storage.
 
-請妥善限制 Notion Integration 能存取的頁面，並在 Google Cloud、AI Studio 或 OpenRouter 管理 API Key、額度與刪除。若電腦由多人共用，建議不要勾選記住金鑰，並在使用後清除金鑰。
+## What this extension does not do
+
+- It does not collect browsing history. It only reads the current Notion tab URL to identify the page when the popup opens or when you use single-page analysis.
+- It does not run content scripts.
+- It does not put keys in URLs, source, ZIP files, analysis logs, or Notion.
+- It does not change Notion’s original `名稱` or page body.
+- It does not delete database properties or status options you added.
+- It does not run a scheduled auto-scan of the database. Opening the popup may query Notion to identify the current page; database scans, article analysis, and topic organizing start only after explicit user actions. `alarms` is used only to continue a queue you already started.
+
+## Your responsibilities
+
+Limit which pages the Notion Integration can access. Manage API keys, quotas, and deletion in Google Cloud, AI Studio, or OpenRouter. On a shared computer, do not remember keys, and clear them when you are done.
