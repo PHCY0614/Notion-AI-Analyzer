@@ -1,143 +1,145 @@
-# Notion AI 分析工具 0.6.1
+# Notion AI Analyzer 0.6.1
 
-這是一個 Chrome 擴充功能，用 Google AI Studio、Vertex AI 或 OpenRouter 分析 Notion 頁面的純文字，產生繁體中文標題、主題、關鍵字與摘要。
+A Chrome extension that uses Google AI Studio, Vertex AI, or OpenRouter to analyse plain text from Notion pages and produce Traditional Chinese titles, topics, keywords, and summaries.
 
-## 這版的重點
+Traditional Chinese (Taiwan): [`README.zh-TW.md`](README.zh-TW.md)
 
-- 資料庫缺少「整理狀態」欄位、欄位類型不正確或缺少「待分析」選項時，設定頁與 Popup 會直接說明應在 Notion 完成的操作，不再顯示工程用語或讓提示被重新整理立即蓋掉。
-- 重新掃描以 Notion 最新的「待分析」頁面為準：閒置時清空舊佇列，真正開始批次分析時才建立；暫停中的批次則移除失效頁面並加入最新頁面。
-- 沒有任何待分析文章時，會提示先在 Notion 將文章設為「待分析」，並停用無法執行的批次分析按鈕。
-- 主題字典操作區改為「匯出」與「匯入」兩個主要操作；匯入使用分裂按鈕選擇「合併既有字典」或「取代既有字典」，沒有改動設定頁其他區塊的字體大小。
-- 單篇分析執行時，同一顆按鈕會切換為「停止分析」；停止後恢復為分析目前頁面的操作，不影響批次佇列。
-- 批次的「停止分析／繼續分析」合併為同一顆按鈕，並與「重試失敗」維持同排大小。
-- 單篇逐項確認時，自訂建立的主題會立即加入下一個候選的既有主題選單，不必重複輸入。
-- 不再支援舊版 `待確認主題`。掃描前必須已有 `整理狀態` select 欄位與 `待分析` 選項，缺少時會停止並明確指出；工具不會動到其他自訂選項。
-- Popup 會依目前所在的 Notion 畫面切換操作：資料庫頁只顯示掃描、批次分析、佇列控制、重試與批次主題整理；可分析的單篇資料頁只顯示目前頁面功能。批次執行期間的進度與停止按鈕則維持全域可見，不會因切換頁面而中斷佇列。
-- 「分析下一篇」已移除；資料庫操作改為「掃描資料庫」與「分析所有『待分析』頁面」。兩分鐘內剛完成的同資料庫掃描結果可直接供批次分析使用，避免連續操作時重複查詢。
-- 文章分析與主題整理完全分離。批次分析只寫入 AI 標題、摘要、關鍵字、暫定主題與整理狀態，不會改動 `AI 主題`。
-- 批次分析預設把 1–3 個分類寫入 `AI 暫定主題` 後繼續下一篇；可在設定中調整為 1–5 個，新主題仍最多 5 個可見字元。
-- 每次主題整理從符合條件的頁面中收集最多 75 個去重後的暫定主題；少於 75 個也能正常執行，不會自動接續下一批。
-- 可依 Notion 資料庫個別開啟「優先沿用既有主題」。開啟後，主題整理會先嘗試以既有主題合理涵蓋具體情境、行為、策略與子類型；無法合理涵蓋時仍可建議新主題。所有結果仍須人工確認。
-- 主題整理只使用 `整理狀態`、`AI 暫定主題` 與 `AI 主題`。不讀取頁面正文、AI 標題、摘要或關鍵字，也不把篇數、共現關係或文章相似度當成分類依據。
-- 可直接在 Notion 頁面按「分析目前頁面」，分析完成後逐一確認暫定主題；可沿用既有主題、自訂、暫不處理，並自行選擇是否記住對照。
-- AI 會直接把整批不重複的暫定主題整理成中等粒度群組；除了同義詞與命名變體，也可合併能由同一個實用分類自然涵蓋、且不會明顯損失主要檢索用途的相近主題。同領域、上下位或彼此相關可作為參考，但不能單獨構成合併理由。
-- 新正式主題限制為 2–6 個可見字元並優先使用 2–4 字；既有 `AI 主題` 可保留原名稱。新群組至少要有兩個來源，單一來源只能直接對應既有主題。
-- 沒有合適群組的零星主題放在「本輪未分類」，使用者可逐項建立正式主題、改用既有主題、永久捨棄或暫時跳過。
-- 套用主題前會重新讀取頁面並疊加目前值；交錯群組不會互相覆寫，回復只移除上一次實際新增的主題。
-- 支援可編輯提示詞、直接自訂輸出規格、恢復各自預設值與單次 AI 等待上限。
-- 主題字典可匯出／匯入 JSON，不含 API Key、Token 或文章正文。
-- 保留省用量機制：格式修復只送錯誤輸出，安全封鎖、空輸出與逾時不會自動重送全文。
-- 切換 Notion 資料庫時會清除舊的本機佇列；每篇寫入前也會核對資料來源，避免誤分析另一個資料庫。
-- 若模型拒絕嚴格 JSON schema，主題整理會自動改用相容 JSON 模式；格式仍無法修復時，該批候選全部保留為未分類，不會製造大量錯誤卡片。
-- 主題整理警告會彙總相同問題，不再為每個候選顯示一則安全提醒；更新至本版時也會清除舊分組規格留下的建議快取。
+## Highlights in this version
 
-## Notion 欄位
+- If the database is missing the 「整理狀態」 property, has the wrong type, or is missing the 「待分析」 option, the options page and popup explain what to finish in Notion. They no longer show engineering jargon, and those notices are not immediately overwritten by a refresh.
+- A rescan follows Notion’s current 「待分析」 pages: an idle queue is cleared; a real batch is built only when analysis starts; a paused batch drops stale pages and adds the latest ones.
+- When there are no pending articles, the UI tells you to set pages to 「待分析」 in Notion and disables batch-analysis buttons that cannot run.
+- The topic-dictionary actions are 「匯出」 and 「匯入」. Import is a split button for 「合併既有字典」 or 「取代既有字典」. Other options-page type sizes were not changed.
+- During single-page analysis, the same button switches to 「停止分析」. After stop it returns to analysing the current page and does not affect the batch queue.
+- Batch 「停止分析／繼續分析」 is one button, kept the same size as 「重試失敗」 on that row.
+- During single-page item-by-item confirmation, a custom topic is added immediately to the existing-topic menu for the next candidate, so you do not have to type it again.
+- The old `待確認主題` status is no longer supported. A scan requires an existing `整理狀態` select property and the `待分析` option; if either is missing, the extension stops and says so. Other custom options are left alone.
+- The popup switches by the current Notion surface: a database view shows scan, batch analysis, queue control, retry, and batch topic organizing; an analysable article page shows current-page actions only. Progress and stop during a batch stay globally visible so switching tabs does not interrupt the queue.
+- 「分析下一篇」 is removed. Database actions are 「掃描資料庫」 and 「分析所有『待分析』頁面」. A scan of the same database finished within two minutes can be reused for batch analysis so consecutive actions do not query again.
+- Article analysis and topic organizing are fully separate. Batch analysis writes AI title, summary, keywords, provisional topics, and processing status. It does not change `AI 主題`.
+- Batch analysis writes 1–3 classifications into `AI 暫定主題` by default, then continues. You can set 1–5 in settings. New topic names are still at most 5 visible characters.
+- Each topic-organizing run collects at most 75 distinct provisional topics from matching pages. Fewer than 75 still runs; it does not automatically continue to another batch.
+- 「優先沿用既有主題」 can be turned on per Notion data source. When on, organizing first tries to cover specific situations, behaviours, strategies, and subtypes with existing topics; it may still suggest new topics when that is not reasonable. All results still need human confirmation.
+- Topic-organizing queries ask Notion to return only the `整理狀態`, `AI 暫定主題`, and `AI 主題` database properties. Page body, AI title, summary, and keywords are not sent for classification, and occurrence counts, co-occurrence, and article similarity are not used as grouping evidence.
+- On a Notion article page you can use 「分析目前頁面」, then confirm provisional topics one by one: keep an existing topic, create a custom name, skip for now, and choose whether to remember the mapping.
+- The AI groups this batch’s distinct provisional topics at a medium grain. Besides synonyms and naming variants, it may merge nearby topics that one practical category can cover without a clear loss of main retrieval use. Same domain, hierarchy, or relatedness may support a suggestion but cannot be the only reason to merge.
+- New confirmed topics are 2–6 visible characters, preferring 2–4. Existing `AI 主題` names may keep their original form. A new group needs at least two sources; a single source may only map onto an existing topic.
+- Stray topics with no suitable group go to 「本輪未分類」. You can create a confirmed topic, map to an existing one, discard permanently, or skip for now.
+- Before apply, each page is re-read and values are unioned. Interleaved groups do not overwrite each other. Rollback removes only topics actually added in the last apply.
+- The analysis prompt is editable. Output spec values can be set directly, each with its own restore-default action, plus a per-request AI wait limit.
+- The topic dictionary can be exported and imported as JSON without API keys, tokens, or article text.
+- Usage-saving behaviour is kept: format repair sends only the bad output; safety blocks, empty output, and timeouts do not automatically resend the full article.
+- Switching Notion data sources clears the old local queue. Each write also checks the data source so another database is not analysed by mistake.
+- If a model rejects strict JSON schema, topic organizing falls back to compatible JSON mode. If the format still cannot be repaired, that batch’s remaining candidates stay unclassified instead of producing a mass of bad cards.
+- Organizer warnings are grouped by issue instead of one safety notice per candidate. Updating to this version also clears suggestion cache left by the old grouping spec.
 
-使用本工具前，資料庫必須已有 `整理狀態` 選取欄位及 `待分析` 選項。掃描與測試連線會先檢查這兩項，缺少時停止並直接說明如何在 Notion 修正。必要欄位檢查通過後，工具才會補上缺少的 AI 欄位與其餘流程狀態；不會刪除、移動、重新命名或改動使用者自行建立的其他選項。
+## Notion properties
 
-| 欄位 | 類型 | 用途 |
+Before using this extension, the database must already have a `整理狀態` select property and the `待分析` option. Testing the connection, scanning, starting a queue, or opening the popup on a Notion page checks these first (`整理狀態` must be select and include `待分析`); if they are missing, the extension stops and explains how to fix them in Notion. Only after that gate passes may it PATCH missing AI properties and remaining status options. It does not delete, move, rename, or change other options you created.
+
+| Property | Type | Use |
 | --- | --- | --- |
-| AI 標題 | rich_text | 預設最多 12 個可見字元 |
-| AI 主題 | multi_select | 已確認的標準主題 |
-| AI 暫定主題 | rich_text | 尚待整理或確認的分類，以 `｜` 分隔 |
-| AI 關鍵字 | rich_text | 預設 5 個關鍵字，以 `｜` 分隔 |
-| AI 摘要 | rich_text | 預設 100–250 字 |
-| 整理狀態 | select | 待分析、分析中、待主題整理、待主題確認、已分析、分析失敗 |
+| AI 標題 | rich_text | Default at most 12 visible characters |
+| AI 主題 | multi_select | Confirmed standard topics |
+| AI 暫定主題 | rich_text | Classifications still to organize or confirm, separated by `｜` |
+| AI 關鍵字 | rich_text | Default 5 keywords, separated by `｜` |
+| AI 摘要 | rich_text | Default 100–250 characters |
+| 整理狀態 | select | 待分析, 分析中, 待主題整理, 待主題確認, 已分析, 分析失敗 |
 
-## 安裝
+## Install
 
-1. 解壓縮 ZIP。
-2. 開啟 Chrome 的 `chrome://extensions`。
-3. 開啟「開發人員模式」。
-4. 按「載入未封裝項目」，選取含有 `manifest.json` 的資料夾。
-5. 開啟設定頁，填入 Notion Integration Token、資料庫網址或 Data Source ID，以及 AI 服務金鑰。
-6. 按「測試連線並準備欄位」。
+1. Unzip the ZIP.
+2. Open Chrome `chrome://extensions`.
+3. Turn on Developer mode.
+4. Load unpacked and choose the folder that contains `manifest.json`.
+5. Open the options page and enter the Notion Integration Token, the database URL or Data Source ID, and the AI key.
+6. Click 「測試連線並準備欄位」.
 
-Notion Integration 必須已獲邀存取指定資料庫。
+The Notion Integration must already be invited to the target database.
 
-## AI 服務商
+## AI providers
 
 ### Google AI Studio
 
-使用 Gemini API Key。這裡的用量不會扣 Google Cloud 300 美元試用額度。設定頁提供 AI Studio 用量與速率限制連結。
+Uses a Gemini API key. Usage here does not draw down the Google Cloud US$300 trial credit. The options page links to AI Studio usage and rate-limit documentation.
 
-Google AI Studio／Gemini API 未付費服務提交的內容與回應，可能由 Google 用於改善產品及機器學習技術（包括模型訓練），也可能由人工檢閱。請勿提交敏感、機密或個人資訊。若專案已啟用 Cloud Billing，可能適用付費服務的資料條款；實際規則以 [Gemini API Additional Terms of Service](https://ai.google.dev/gemini-api/terms) 為準。
+Content and responses submitted to Google AI Studio / Gemini API unpaid service may be used by Google to improve products and machine-learning technology (including model training) and may be human-reviewed. Do not submit sensitive, confidential, or personal information. If the project has Cloud Billing enabled, paid-service data terms may apply; the [Gemini API Additional Terms of Service](https://ai.google.dev/gemini-api/terms) govern.
 
 ### Vertex AI
 
-使用已啟用 Vertex AI 的 Google Cloud API Key。合資格用量可由 Google Cloud 試用額度扣抵，實際範圍與餘額以 Cloud Billing 為準。模型清單只放 Google 的文字生成模型，保留 Preview 模型；選定後以輕量 Token 計數要求驗證，不會自動切換模型。
+Uses a Google Cloud API key with Vertex AI enabled. Eligible usage may count against the Google Cloud trial credit; actual coverage and remaining credit follow Cloud Billing. The model list is Google text-generation models, including Preview models. After you select one, a lightweight token-count request verifies it; the extension does not switch models automatically.
 
 ### OpenRouter
 
-模型掃描只列出具文字輸出、明確支援 Structured Outputs 且上下文足以分析文章的具體模型；排除 `openrouter/free` 隨機路由及圖片、影音、嵌入、重排與程式碼專用模型。Preview／實驗模型會保留。免費與付費模型會清楚標示，付費模型必須勾選費用確認。
+Model listing includes only concrete models with text output, explicit Structured Outputs support, and enough context for article analysis. It excludes `openrouter/free` random routing and image, audio/video, embedding, rerank, and code-specialist models. Preview / experimental models are kept. Free and paid models are labelled; paid models require a cost-confirmation checkbox.
 
-## 分析流程
+## Analysis flow
 
-1. 依 Notion `created_time` 由舊到新讀取 `待分析` 頁面。
-2. 讀取純文字區塊。
-3. 一次 AI 呼叫產生標題、摘要、關鍵字與暫定主題。
-4. 只更新 `AI 標題`、`AI 摘要`、`AI 關鍵字`、`AI 暫定主題` 與 `整理狀態`；既有 `AI 主題` 保持原樣。
-5. 狀態改為 `待主題整理`。
-6. 批次自動前往下一篇。
+1. Read `待分析` pages from oldest to newest by Notion `created_time`.
+2. Read plain-text blocks.
+3. One AI call produces title, summary, keywords, and provisional topics.
+4. Update only `AI 標題`, `AI 摘要`, `AI 關鍵字`, `AI 暫定主題`, and `整理狀態`. Existing `AI 主題` is left as-is.
+5. Status becomes `待主題整理`.
+6. Batch analysis continues to the next page.
 
-不論是否已建立主題字典，字典與 Notion 既有選項都不會送進文章分析提示詞，也不會影響文章的獨立分類。
+Whether or not a topic dictionary exists, the dictionary and existing Notion options are not sent in the article-analysis prompt and do not affect independent classification of the article.
 
-### 分析目前頁面
+### Analyse the current page
 
-在設定資料庫中的 Notion 文章頁開啟擴充功能，按「分析目前頁面」。工具直接從目前網址辨識 Page ID，不依賴來源網址、貼文編號、擷取鍵或本機佇列順序。若頁面已有 AI 內容，會先詢問是否更新。分析後可逐一採用候選、改用既有主題、自訂最多 5 字的新主題，或暫不處理；最後以疊加方式更新 `AI 主題`。仍有暫不處理項目時保留 `AI 暫定主題`；全部解決並轉為 `已分析` 後才清空。
+Open the extension on an article page in the configured database and click 「分析目前頁面」. The Page ID is taken from the current tab URL. Source URLs, post numbers, capture keys, and local queue order are not required. If the page already has AI content, you are asked before it is updated. After analysis you can accept a candidate, map it to an existing topic, create a custom topic of at most 5 characters, or skip it for now; confirmed `AI 主題` is then updated by union. Unresolved skip items keep `AI 暫定主題`. The field is cleared only after everything is resolved and status becomes `已分析`.
 
-## 整理主題
+## Topic organizing
 
-每次按「掃描並產生整理建議」，會依序查詢 `待主題整理` 或 `待主題確認` 頁面，直到收集到最多 75 個去重後的 `AI 暫定主題`，或已沒有更多符合條件的頁面。少於 75 個時照常執行；每次按鈕操作就是獨立的一批，不會自動接續下一批。
+Each time you click 「掃描並產生整理建議」, pages in `待主題整理` or `待主題確認` are queried until there are at most 75 distinct `AI 暫定主題` names, or no more matching pages. Fewer than 75 still runs. Each button press is its own batch and does not automatically continue to the next batch.
 
-這項功能只擷取每頁的 Page ID、`整理狀態`、`AI 暫定主題` 與 `AI 主題`。Page ID 只用於正確寫回；送給 AI 的分類內容只有本批不重複的暫定主題名稱與可參考的既有 AI 主題名稱。頁面正文、名稱、AI 標題、摘要、關鍵字、出現次數、共同出現關係及影響篇數都不參與分類判斷。
+The organizer query asks Notion to return only the `整理狀態`, `AI 暫定主題`, and `AI 主題` database properties; Page ID is used only to write back to the correct page. Classification sent to the AI is only this batch’s distinct provisional topic names and optional existing confirmed `AI 主題` names. Page body, page title, AI title, summary, keywords, occurrence counts, co-occurrence, and impact counts are not used for classification.
 
-AI 直接閱讀整批暫定主題名稱，再提出中等粒度、可長期沿用的正式主題。這是主題標籤的去重與規範化，不是建立固定的大領域 taxonomy，也不是依文章共現進行分群。當一個實用的中等粒度分類能自然涵蓋多個暫定主題，而且合併後不會明顯損失它們的主要檢索用途時，即可提出合併；這包含同義詞、命名／措辭變體，以及使用者通常會一起瀏覽或檢索的相近範圍。同領域、上下位、彼此相關、常一起出現或能同時掛在一篇文章上可以支持建議，但不能單獨構成合併理由；若各自屬於不同分析維度，或必須使用讓人無法預測內容的過大傘狀主題，仍應保持獨立。既有 `AI 主題` 只是跨批次的可選參考，不強制沿用。新正式主題須為 2–6 個可見字元，優先使用自然、精準的 2–4 字名稱；5–6 字只在確有必要時使用，並避免為湊字數加入「解析、解讀、觀察、系統、規劃、分析」等空泛尾詞。新群組至少要有兩個來源，若只有一個來源，只能直接對應既有 AI 主題。
+The AI reads the batch of provisional names and proposes medium-grain, durable confirmed topics. This is deduplication and normalisation of topic labels, not a fixed top-level taxonomy and not clustering by article co-occurrence. Merge is proposed when one practical medium-grain category can cover several provisional topics without a clear loss of their main retrieval use. That includes synonyms, naming / wording variants, and nearby ranges people would usually browse or search together. Same domain, hierarchy, relatedness, frequent co-occurrence, or the ability to sit on the same article may support a suggestion but cannot be the only reason to merge. Topics that belong to different analysis dimensions, or that would need an oversized umbrella whose content you cannot predict, stay separate. Existing `AI 主題` is optional cross-batch reference, not a required reuse. New confirmed topics must be 2–6 visible characters, preferring natural, precise 2–4 character names. 5–6 characters are only when necessary, and empty tails such as 「解析、解讀、觀察、系統、規劃、分析」 should not be added to pad length. A new group needs at least two sources; a single source may only map onto an existing AI topic.
 
-找不到合適群組的來源會集中顯示在「本輪未分類」，再沿用單篇確認式介面逐項處理：
+Sources with no suitable group are listed under 「本輪未分類」 and handled with the same item-by-item confirmation pattern:
 
-- 建立新的正式主題。
-- 從 Notion 既有 `AI 主題` 中選擇對應項目。
-- 永久捨棄不適合的暫定主題。
-- 暫時跳過，保留到之後重新掃描。
+- Create a new confirmed topic.
+- Map to an existing Notion `AI 主題`.
+- Permanently discard an unsuitable provisional topic.
+- Skip for now and keep it for a later rescan.
 
-建立、選擇既有或永久捨棄都代表該暫定主題已處置，會立即從所有受影響頁面的 `AI 暫定主題` 中移除；只有暫時跳過不改動 Notion，之後仍可重新判斷。永久捨棄的名稱會記在本機，未來不再交給 AI 強制分組，但若其他頁面再次出現，仍會列入人工處理以便明確移除。
+Create, map-to-existing, and permanent discard all count as resolving that provisional topic and immediately remove it from `AI 暫定主題` on every affected page. Skip-for-now does not change Notion, so you can decide again later. Permanently discarded names are remembered locally and are not forced into AI grouping later, but if they appear again on other pages they still surface for a human to remove them explicitly.
 
-套用前可以：
+Before apply you can:
 
-- 勾選建議，並在同一組內逐一決定哪些暫定主題要套用；未勾選的候選會繼續保留待確認。
-- 查看「建議說明」與模型建議保持獨立的相關主題，或按「暫不處理」留待下次重新建議。
-- 修改標準主題名稱。
-- 「若套用，將更新 N 篇」由本機在 AI 判斷完成後計算，只表示操作範圍，不影響信心判斷。
-- 展開「本輪未分類」逐項建立、對應、捨棄或暫時跳過未被硬塞進群組的暫定主題。
-- 選擇性勾選全部高信心建議；這只會預先選取，不會自動套用。
-- 用「清除目前建議」移除過期清單；這不會刪除 Notion 主題、改動文章或清除主題字典。
+- Tick suggestions and, inside a group, decide which provisional topics to apply; unticked candidates stay pending confirmation.
+- Read 「建議說明」 and related topics the model suggested keeping separate, or click 「暫不處理」 for the next suggestion run.
+- Edit the standard topic name.
+- 「若套用，將更新 N 篇」 is computed locally after the AI judgement. It is a scope count, not a confidence score.
+- Expand 「本輪未分類」 to create, map, discard, or skip provisional topics that were not forced into a group.
+- Optionally tick all high-confidence suggestions. That only pre-selects; it does not apply.
+- Use 「清除目前建議」 to drop a stale list. That does not delete Notion topics, change articles, or clear the topic dictionary.
 
-確認後由 Notion API 批次更新，不再呼叫 AI。每頁在寫入前重新讀取，將標準主題與目前 `AI 主題` 聯集後寫回。每個成功套用或人工處置的暫定主題都會立即從該頁的 `AI 暫定主題` 中移除；同組未勾選或尚未處理的候選則原樣保留。只要頁面仍有未解決項目，就維持 `待主題確認`；暫定主題完全歸零時清空欄位並改為 `已分析`。本機字典只有在對應標準仍存在於 Notion 時才會沿用，避免已刪除的舊主題再次成為建議標準。工具保留上一次套用或人工處置的快照，回復時只移除該次實際新增的主題，並安全恢復相應狀態與暫定主題；新建的 Notion 選項不會自動刪除。
+After confirmation, Notion API batch updates run with no further AI call. Each page is re-read before write, and the standard topic is unioned with current `AI 主題`. Each successfully applied or manually resolved provisional topic is removed from that page’s `AI 暫定主題` at once; unticked or still-open candidates in the same group stay. While unresolved items remain, status stays `待主題確認`. When provisional topics are fully empty, the field is cleared and status becomes `已分析`. The local dictionary is reused only while the corresponding standard still exists in Notion, so deleted old topics are not suggested again. The last apply or manual-resolve snapshot is kept; rollback removes only topics actually added that time and restores matching status and provisional topics. Newly created Notion options are not deleted automatically.
 
-## 進階分析設定
+## Advanced analysis settings
 
-輸出預設為：標題上限 12、主題 1–3、關鍵字 5、摘要 100–250。設定頁直接顯示六個數值框與目前規格摘要，不再區分精簡、平衡、詳細；允許範圍為：
+Default output is title cap 12, topics 1–3, keywords 5, summary 100–250. The options page shows six numeric fields and a live spec summary. There is no compact / balanced / detailed preset. Allowed ranges:
 
-- 標題上限：6–30
-- 主題最少／最多：1–5
-- 關鍵字數量：3–10
-- 摘要最少：50–500
-- 摘要最多：100–800
+- Title cap: 6–30
+- Topic min / max: 1–5
+- Keyword count: 3–10
+- Summary min: 50–500
+- Summary max: 100–800
 
-「恢復預設規格」只重設六個數值框；「恢復預設提示詞」只重設分析提示詞，避免意外清除另一項自訂內容。設定會同時套用到提示詞、JSON Schema、本機驗證與格式修復，不是只有畫面文字。提示詞可修改、複製、恢復預設並預覽實際送出的固定安全與輸出契約。
+「恢復預設規格」 resets only the six numeric fields. 「恢復預設提示詞」 resets only the analysis prompt, so one customisation is not cleared by accident. Settings apply to the prompt, JSON Schema, local validation, and format repair, not just on-screen copy. You can edit, copy, restore, and preview the prompt, including the fixed safety and output contract that is actually sent.
 
-單次 AI 等待上限可選 3、5、10 分鐘或不限制，預設 5 分鐘。逾時會停止該次要求、不自動重送全文、把文章放回待分析並暫停佇列。
+The per-request AI wait limit can be 3, 5, or 10 minutes, or unlimited. Default is 5 minutes. A timeout stops that request, does not automatically resend the full article, returns the page to pending analysis, and pauses the queue.
 
-## 長文與失敗處理
+## Long articles and failures
 
-- 一般文章為一次主要 AI 呼叫；超過模型安全長度時才分段抽取筆記後整合。
-- AI JSON 格式錯誤時，修復要求只包含錯誤輸出與檢查訊息，不包含原文。
-- 片段格式修復只包含錯誤的片段輸出，不重新傳送片段或全文。
-- 安全封鎖、禁止內容或空輸出不進行無效重試。
-- Notion 寫回重試不會重新呼叫 AI。
-- 單頁讀取 90 秒、掃描 90 秒、Notion 寫回 60 秒會顯示明確逾時訊息。
+- A typical article is one main AI call. Only when the text exceeds the model’s safe length are notes extracted in chunks and then combined.
+- On bad AI JSON, the repair request contains only the bad output and the check message, not the source article.
+- Chunk format repair contains only the bad chunk output; it does not resend the chunk or the full article.
+- Safety blocks, prohibited content, and empty output are not retried in a way that cannot succeed.
+- Notion write retries do not call AI again.
+- Explicit timeout messages: 90 seconds for a single-page read, 90 seconds for a scan, 60 seconds for a Notion write.
 
-## 隱私
+## Privacy
 
-擴充功能沒有自建中介伺服器。文章直接從 Notion 傳到你選擇的 AI 服務商；未選的服務商不會收到文章。圖片、影片、音訊、檔案與 PDF 不會作為分析內容。詳細資料流請見 `PRIVACY.md`。
+The extension developer does not operate a separate intermediary server, and the extension has no analytics or telemetry. Articles go from Notion to the AI provider you selected; providers you did not select do not receive the article. Images, video, audio, files, and PDFs are not used as analysis input. Opening the popup on a Notion page may query Notion to identify the current page. For the full data-flow description, see [`PRIVACY.md`](PRIVACY.md) ([Traditional Chinese](PRIVACY.zh-TW.md)).
