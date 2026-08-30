@@ -1,12 +1,16 @@
 # 隱私與資料流說明
 
-版本：0.6.1
+最後更新：2026-08-30
+
+開發與維護：Penny Hsieh
+
+本擴充功能目前僅透過 GitHub 提供，尚未發布至 Chrome Web Store。
 
 英文版：[`PRIVACY.md`](PRIVACY.md)
 
 ## 會讀取的資料
 
-本工具使用你提供的 Notion Integration Token 存取指定的資料庫，並檢查從目前分頁辨識出的 Notion 頁面：
+本工具需在 Google Chrome 中搭配 Notion 網頁版使用。它使用你提供的 Notion Integration Token 存取指定的資料庫，並檢查從目前分頁辨識、且屬於該資料庫的 Notion 頁面：
 
 - 頁面 ID、Notion 網址與原始頁面標題，用於佇列和操作紀錄。
 - 頁面中的純文字區塊，用於 AI 分析。
@@ -63,3 +67,7 @@ Chrome 權限為 `storage`、`alarms`、`activeTab`。主機權限僅限 `https:
 ## 使用者責任
 
 請妥善限制 Notion Integration 能存取的頁面，並在 Google Cloud、AI Studio 或 OpenRouter 管理 API Key、額度與刪除。若電腦由多人共用，建議不要勾選記住金鑰，並在使用後清除金鑰。
+
+## 聯絡
+
+如有隱私或資料處理相關問題，可透過本專案的 [GitHub Issues](https://github.com/PHCY0614/Notion-AI-Analyzer/issues) 提出。請勿在公開 Issue 中貼上 API Key、Notion Token、文章內容或其他私人資料。
