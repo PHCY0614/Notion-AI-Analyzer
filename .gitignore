@@ -1,0 +1,36 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+credentials*.json
+secrets*.json
+config.local.*
+
+# Dependencies, caches, and test output
+node_modules/
+coverage/
+.cache/
+.tmp/
+tmp/
+*.log
+
+# Build and packaged extension artifacts
+dist/
+build/
+*.crx
+*.zip
+*.tgz
+
+# Editors and operating systems
+.vscode/
+.idea/
+*.code-workspace
+.DS_Store
+Thumbs.db
+Desktop.ini

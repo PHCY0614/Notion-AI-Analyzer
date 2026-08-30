@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Notion AI 分析工具設定</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <span class="eyebrow">NOTION × GEMINI</span>
+      <h1>AI 分析工具設定</h1>
+      <p>讀取 Notion 頁面的純文字，寫入固定的 AI 分析欄位；不更動原始標題、頁面正文或其他欄位。</p>
+    </header>
+
+    <form id="settings-form" novalidate>
+      <section class="panel" aria-labelledby="notion-heading">
+        <div class="section-heading">
+          <span class="step">1</span>
+          <div>
+            <h2 id="notion-heading">連接 Notion</h2>
+            <p>Integration 必須已獲邀存取你的文章資料庫。</p>
+          </div>
+        </div>
+
+        <label for="notion-token">Notion Integration Token</label>
+        <input id="notion-token" name="notionToken" type="password" autocomplete="off" spellcheck="false" placeholder="secret_…（留白會保留目前設定）">
+        <label class="check-row">
+          <input id="remember-notion-token" name="rememberNotionToken" type="checkbox">
+          <span>記住在這台電腦</span>
+        </label>
+        <p class="hint">未勾選時只保留到瀏覽器完全關閉。勾選後會存於 Chrome 擴充功能的本機儲存空間，不是加密保險箱。</p>
+
+        <label for="notion-target">Notion 資料庫網址或 Data Source ID</label>
+        <input id="notion-target" name="notionTarget" type="text" autocomplete="off" spellcheck="false" placeholder="貼上資料庫網址，或擷取工具顯示的 Data Source ID" required>
+        <p class="hint">欄位在 Notion 裡的排列順序不影響工具。若資料庫有多個 Data Source，請填入精確 ID。</p>
+      </section>
+
+      <section class="panel" aria-labelledby="gemini-heading">
+        <div class="section-heading">
+          <span class="step">2</span>
+          <div>
+            <h2 id="gemini-heading">連接 AI 服務</h2>
+            <p>可使用 Google AI Studio、Vertex AI，或從 OpenRouter 選擇免費及付費模型。</p>
+          </div>
+        </div>
+
+        <label for="ai-provider">AI 服務商</label>
+        <select id="ai-provider" name="aiProvider">
+          <option value="gemini">Google AI Studio</option>
+          <option value="vertex">Vertex AI（Google Cloud）</option>
+          <option value="openrouter">OpenRouter</option>
+        </select>
+
+        <div id="gemini-settings">
+          <label for="gemini-key">Google AI Studio API Key</label>
+          <input id="gemini-key" name="geminiKey" type="password" autocomplete="off" spellcheck="false" placeholder="AIza…（留白會保留目前設定）">
+          <label class="check-row">
+            <input id="remember-gemini-key" name="rememberGeminiKey" type="checkbox">
+            <span>記住在這台電腦</span>
+          </label>
+          <p class="hint">這裡的 Gemini API 不會使用 Google Cloud 的 300 美元試用額度。</p>
+          <p class="hint"><strong>資料使用提醒：</strong>Google AI Studio／Gemini API 未付費服務提交的內容與回應，可能由 Google 用於改善產品及機器學習技術（包括模型訓練），也可能由人工檢閱。請勿傳送敏感、機密或個人資訊；若專案已啟用 Cloud Billing，可能適用付費服務的資料條款。<a href="https://ai.google.dev/gemini-api/terms" target="_blank" rel="noreferrer">查看官方條款</a></p>
+          <p class="hint"><a href="https://ai.dev/rate-limit" target="_blank" rel="noreferrer">查看 Google AI Studio 用量與速率限制</a></p>
+        </div>
+
+        <div id="vertex-settings" hidden>
+          <label for="vertex-key">Vertex AI Google Cloud API Key</label>
+          <input id="vertex-key" name="vertexKey" type="password" autocomplete="off" spellcheck="false" placeholder="AIza…（留白會保留目前設定）">
+          <label class="check-row">
+            <input id="remember-vertex-key" name="rememberVertexKey" type="checkbox">
+            <span>記住在這台電腦</span>
+          </label>
+          <p class="hint">Vertex AI 的合資格用量可由 Google Cloud 300 美元試用額度扣抵；實際適用範圍與剩餘額度以 Cloud Billing 顯示為準。</p>
+          <p class="hint"><a href="https://console.cloud.google.com/apis/api/aiplatform.googleapis.com/quotas" target="_blank" rel="noreferrer">查看 Vertex AI 配額</a> · <a href="https://console.cloud.google.com/billing" target="_blank" rel="noreferrer">查看 Cloud Billing 與試用額度</a></p>
+        </div>
+
+        <div id="openrouter-settings" hidden>
+          <label for="openrouter-key">OpenRouter API Key</label>
+          <input id="openrouter-key" name="openRouterKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-or-v1-…（留白會保留目前設定）">
+          <label class="check-row">
+            <input id="remember-openrouter-key" name="rememberOpenRouterKey" type="checkbox">
+            <span>記住在這台電腦</span>
+          </label>
+          <p class="hint">模型掃描會列出適合文章分析、明確支援嚴格結構輸出的免費及付費模型；保留 Preview／實驗模型，排除免費隨機路由及程式碼、圖片、語音、嵌入與重排專用模型。</p>
+          <p class="hint"><a href="https://openrouter.ai/activity" target="_blank" rel="noreferrer">查看 OpenRouter 用量與費用</a></p>
+          <label id="openrouter-paid-row" class="check-row" hidden>
+            <input id="openrouter-paid-confirmed" name="openRouterPaidConfirmed" type="checkbox">
+            <span>我知道目前選擇的是付費模型，呼叫會產生費用</span>
+          </label>
+          <p id="openrouter-price-warning" class="hint" hidden></p>
+        </div>
+
+        <div class="model-row">
+          <div class="grow">
+            <label for="gemini-model">分析模型</label>
+            <select id="gemini-model" name="geminiModel" required>
+              <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite｜建議</option>
+              <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite</option>
+              <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite</option>
+              <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
+            </select>
+            <select id="vertex-model" name="vertexModel" hidden>
+              <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite｜建議</option>
+              <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
+              <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite</option>
+              <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro Preview</option>
+              <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+              <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+            </select>
+            <select id="openrouter-model" name="openRouterModel" hidden>
+              <option value="openrouter/free" data-is-free="true">請先掃描並選擇具體模型</option>
+            </select>
+          </div>
+          <button id="load-models" class="button secondary compact" type="button">掃描所有可用模型</button>
+        </div>
+        <p id="model-summary" class="hint">Google AI Studio 可掃描 Key 可見模型；Vertex AI 使用建議模型；OpenRouter 只列出符合嚴格分析格式的具體模型。</p>
+
+        <aside class="notice" role="note">
+          <strong>金鑰與帳務提醒</strong>
+          <span>所有金鑰都只儲存在目前 Chrome 使用者設定中。Vertex AI 用量由對應 Google Cloud 專案計費；請留意試用額度期限與帳務上限。</span>
+        </aside>
+      </section>
+
+      <section class="panel" aria-labelledby="fields-heading">
+        <div class="section-heading">
+          <span class="step">3</span>
+          <div>
+            <h2 id="fields-heading">準備 Notion 欄位</h2>
+            <p>資料庫必須先有「整理狀態」選取欄位與「待分析」選項；缺少時工具會停止並指出該怎麼處理。</p>
+          </div>
+        </div>
+        <p class="hint">必要欄位檢查通過後，測試連線會補上工具缺少的 AI 欄位與其他流程狀態；不會刪除、改名或修改你自行建立的其他選項。</p>
+        <div class="field-grid" aria-label="工具管理的欄位">
+          <span><b>AI 標題</b><small>rich_text</small></span>
+          <span><b>AI 主題</b><small>multi_select</small></span>
+          <span><b>AI 暫定主題</b><small>rich_text</small></span>
+          <span><b>AI 關鍵字</b><small>rich_text</small></span>
+          <span><b>AI 摘要</b><small>rich_text</small></span>
+          <span><b>整理狀態</b><small>select</small></span>
+        </div>
+        <p class="hint">文章分析一律只產生「AI 暫定主題」，不會讀取或改動「AI 主題」。標準主題只會由下方的主題整理或單篇確認流程疊加寫入。</p>
+        <label for="excluded-person-terms">人物與代稱排除清單</label>
+        <textarea id="excluded-person-terms" name="excludedPersonTerms" rows="4" spellcheck="false" placeholder="每行或逗號分隔，例如：A、B、C、D"></textarea>
+        <p class="hint">這些名稱不會被寫入 AI 關鍵字。適合填入敘事角色、匿名字母、姓氏或固定暱稱；預設留白，可隨時增刪。</p>
+        <p class="hint">新主題通常為 2 至 4 字、最多 5 字，並應代表一個完整的分類概念。連接詞或符號若屬於專有名稱或完整術語的一部分，可以保留。</p>
+        <p class="hint">狀態流程：待分析 → 分析中 → 已分析；尚未建立標準分類時為待主題整理，仍有無法對應項目時為待主題確認，失敗時為分析失敗。</p>
+      </section>
+
+      <details class="panel" id="advanced-settings">
+        <summary><strong>4　進階分析設定</strong></summary>
+        <p class="hint">自訂內容會保留；JSON 欄位、資料邊界與安全規則由工具固定附加，避免提示文字改壞 Notion 寫回格式。</p>
+        <p><strong>輸出規格</strong></p>
+        <p id="output-spec-summary" class="hint">目前分析規格：標題最多 12 字｜主題 1～3 個｜關鍵字 5 個｜摘要 100～250 字</p>
+        <p class="hint">可調範圍：標題上限 6～30 字｜主題最少與最多各 1～5 個｜關鍵字 3～10 個｜摘要最少 50～500 字、最多 100～800 字。超過範圍時會自動調回最接近的上限或下限。</p>
+        <div class="spec-grid">
+          <label>標題上限（最高 30）<input id="title-max" type="number" min="6" max="30" value="12"></label>
+          <label>主題最少（最高 5）<input id="topic-min" type="number" min="1" max="5" value="1"></label>
+          <label>主題最多（最高 5）<input id="topic-max" type="number" min="1" max="5" value="3"></label>
+          <label>關鍵字數量（最高 10）<input id="keyword-count" type="number" min="3" max="10" value="5"></label>
+          <label>摘要最少（最高 500）<input id="summary-min" type="number" min="50" max="500" value="100"></label>
+          <label>摘要最多（最高 800）<input id="summary-max" type="number" min="100" max="800" value="250"></label>
+        </div>
+        <button id="reset-output-spec" class="button secondary compact" type="button">恢復預設規格</button>
+        <label for="request-timeout">單次 AI 等待上限</label>
+        <select id="request-timeout">
+          <option value="3">3 分鐘</option>
+          <option value="5" selected>5 分鐘（建議）</option>
+          <option value="10">10 分鐘</option>
+          <option value="0">不限制</option>
+        </select>
+        <label for="analysis-prompt">分析提示詞</label>
+        <textarea id="analysis-prompt" rows="18" spellcheck="false"></textarea>
+        <div class="inline-actions">
+          <button id="reset-prompt" class="button secondary compact" type="button">恢復預設提示詞</button>
+          <button id="copy-prompt" class="button secondary compact" type="button">複製提示詞</button>
+          <button id="preview-prompt" class="button secondary compact" type="button">查看實際提示詞</button>
+        </div>
+        <p id="prompt-state" class="hint"></p>
+        <pre id="prompt-preview" class="prompt-preview" hidden></pre>
+      </details>
+
+      <section class="panel" id="topic-organizer-panel" aria-labelledby="organizer-heading">
+        <div class="section-heading">
+          <span class="step">5</span>
+          <div>
+            <h2 id="organizer-heading">整理主題</h2>
+            <p>每次最多整理 75 個去重後的 AI 暫定主題，只使用整理狀態、AI 暫定主題與 AI 主題。AI 會提出可共用的中等粒度分類，其餘交由人工確認。</p>
+          </div>
+        </div>
+        <label class="check-row">
+          <input id="prefer-existing-topics" type="checkbox">
+          <span>優先沿用既有主題</span>
+        </label>
+        <p class="hint">適合已有穩定分類的資料庫。開啟後，具體情境、行為、策略或子類型只要能由既有主題合理涵蓋，就會優先建議沿用；不適合時仍可建立新主題。設定依目前的 Notion 資料庫分別保存，並於下次掃描建議時生效。</p>
+        <div class="inline-actions">
+          <button id="prepare-topics" class="button secondary" type="button">掃描並產生整理建議</button>
+          <button id="select-high" class="button secondary" type="button">勾選高信心建議</button>
+          <button id="apply-topics" class="button primary" type="button">確認套用已勾選項目</button>
+          <button id="clear-topic-suggestions" class="button secondary" type="button">清除目前建議</button>
+          <button id="rollback-topics" class="button danger" type="button" disabled>回復上一次套用</button>
+        </div>
+        <p id="organizer-summary" class="hint">尚未產生建議。</p>
+        <div id="topic-groups" class="topic-groups"></div>
+        <details id="unclassified-panel" class="unclassified-panel" hidden>
+          <summary id="unclassified-summary">本輪未分類</summary>
+          <p class="hint">逐項建立正式主題、改用既有主題、永久捨棄或暫時跳過。前三種會立即從受影響頁面的 AI 暫定主題中移除；暫時跳過才會保留。</p>
+          <div id="unclassified-topics" class="unclassified-topics"></div>
+          <div id="manual-topic-review" class="manual-topic-review" hidden>
+            <p id="manual-topic-progress" class="hint"></p>
+            <div class="manual-topic-title-row">
+              <strong id="manual-topic-name"></strong>
+              <span id="manual-topic-impact" class="confidence"></span>
+            </div>
+            <p id="manual-topic-note" class="hint"></p>
+            <div class="inline-actions manual-primary-actions">
+              <button id="manual-approve-topic" class="button primary compact" type="button">建立同名正式主題</button>
+              <button id="manual-discard-topic" class="button danger compact" type="button">永久捨棄</button>
+              <button id="manual-skip-topic" class="button secondary compact" type="button">暫時跳過</button>
+            </div>
+            <label for="manual-existing-topic">或改用 Notion 既有主題</label>
+            <div class="manual-topic-action-row">
+              <select id="manual-existing-topic"></select>
+              <button id="manual-use-existing" class="button secondary compact" type="button">使用既有主題</button>
+            </div>
+            <label for="manual-custom-topic">或建立自訂正式主題</label>
+            <div class="manual-topic-action-row">
+              <input id="manual-custom-topic" type="text" maxlength="6" placeholder="優先 2～4 字，最多 6 字" autocomplete="off">
+              <button id="manual-use-custom" class="button secondary compact" type="button">使用自訂主題</button>
+            </div>
+          </div>
+        </details>
+        <hr>
+        <div class="inline-actions dictionary-actions">
+          <button id="export-dictionary" class="button secondary compact" type="button">匯出主題字典</button>
+          <div class="split-btn" id="import-split-btn">
+            <div class="split-btn__shell">
+              <button id="import-dictionary-trigger" class="split-btn__trigger" type="button">匯入主題字典</button>
+              <span class="split-btn__divider" aria-hidden="true"></span>
+              <button id="import-mode-toggle" class="split-btn__arrow" type="button" aria-label="選擇匯入方式" aria-expanded="false" aria-haspopup="listbox">
+                <span id="import-mode-display">合併</span>
+                <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="2,4 6,8 10,4"></polyline></svg>
+              </button>
+            </div>
+            <div id="import-mode-menu" class="split-btn__menu" role="listbox" aria-label="匯入方式" hidden>
+              <button type="button" role="option" class="split-btn__option" data-value="merge" aria-selected="true">
+                <svg class="split-btn__check" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3,8 6.5,11.5 13,4.5"></polyline></svg>
+                合併既有字典
+              </button>
+              <button type="button" role="option" class="split-btn__option" data-value="overwrite" aria-selected="false">
+                <svg class="split-btn__check split-btn__check--empty" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3,8 6.5,11.5 13,4.5"></polyline></svg>
+                取代既有字典
+              </button>
+            </div>
+          </div>
+          <select id="import-mode" aria-label="目前字典匯入方式" hidden>
+            <option value="merge">合併既有字典</option>
+            <option value="overwrite">取代既有字典</option>
+          </select>
+          <input id="import-dictionary" type="file" accept="application/json,.json" hidden>
+        </div>
+        <p class="hint">字典檔只含標準主題、定義、別名、顏色與啟用狀態，不含 API Key、Token 或文章正文。</p>
+      </section>
+
+      <div id="status" class="status" role="status" aria-live="polite"></div>
+      <div class="actions">
+        <button id="save" class="button primary" type="submit">儲存設定</button>
+        <button id="test" class="button secondary" type="button">測試連線並準備欄位</button>
+        <button id="clear-credentials" class="button danger" type="button">清除所有金鑰</button>
+      </div>
+    </form>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Notion AI 分析工具</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="app">
+    <header>
+      <div>
+        <span class="eyebrow">NOTION × GEMINI</span>
+        <h1>AI 分析工具</h1>
+      </div>
+      <button id="settings" class="icon-button" type="button" aria-label="開啟設定">設定</button>
+    </header>
+
+    <div id="setup-warning" class="warning" hidden>
+      尚未完成 Notion 與 AI 服務設定。
+      <button id="setup-link" type="button">前往設定</button>
+    </div>
+
+    <section class="status-panel" aria-label="分析狀態">
+      <div class="status-line">
+        <span id="status-dot" class="dot"></span>
+        <strong id="run-status">讀取中</strong>
+      </div>
+      <p id="current-title" class="current">目前沒有正在分析的文章</p>
+      <p id="stage-detail" class="current" hidden></p>
+      <div class="metrics">
+        <div><b id="pending-count">—</b><span>Notion 待分析</span></div>
+        <div><b id="queue-count">0</b><span>本機佇列</span></div>
+        <div><b id="failed-count">0</b><span>分析失敗</span></div>
+      </div>
+    </section>
+
+    <div id="error-box" class="error-box" hidden></div>
+
+    <section id="topic-review" class="topic-review" aria-labelledby="topic-review-heading" hidden>
+      <div class="review-heading">
+        <h2 id="topic-review-heading">確認這一頁的主題</h2>
+      </div>
+      <a id="review-page-title" class="review-page-title" target="_blank" rel="noreferrer"></a>
+      <div class="topic-summary">
+        <div class="topic-summary-row">
+          <span id="topic-progress" class="topic-summary-label">候選主題</span>
+          <div class="topic-chip-list"><strong id="topic-candidate" class="topic-chip"></strong></div>
+        </div>
+        <div class="topic-summary-row">
+          <span class="topic-summary-label">目前保留主題</span>
+          <div id="review-existing" class="topic-chip-list"></div>
+        </div>
+      </div>
+      <label class="replacement-label" for="replacement-topic">若不新增，改用</label>
+      <div class="topic-choice-row">
+        <select id="replacement-topic"></select>
+        <button id="replace-topic" class="button secondary" type="button">改用所選主題</button>
+      </div>
+      <label class="replacement-label" for="custom-topic">或自行輸入主題</label>
+      <div class="custom-topic-row">
+        <input id="custom-topic" class="review-input" type="text" maxlength="6" placeholder="優先 2～4 字，最多 6 字" autocomplete="off">
+        <button id="use-custom-topic" class="button secondary" type="button">使用自訂主題</button>
+      </div>
+      <label class="remember-topic-row">
+        <input id="remember-topic-mapping" type="checkbox" checked>
+        <span>記住這個對照，之後相同暫定主題自動沿用</span>
+      </label>
+      <div class="review-actions">
+        <button id="approve-topic" class="button primary" type="button">採用這個主題</button>
+        <button id="discard-topic" class="button secondary" type="button">這次暫不處理</button>
+      </div>
+      <p class="review-note">候選會逐個顯示。完成分類後會立即寫入主題，並移除對應的暫定主題；暫時略過的項目會保留，且不會再次呼叫 AI。</p>
+    </section>
+
+    <section class="actions" aria-label="分析操作">
+      <button id="analyze-current" class="button primary wide-action" type="button" hidden>分析目前頁面</button>
+      <button id="scan" class="button secondary" type="button" hidden>掃描資料庫</button>
+      <button id="analyze-all" class="button primary" type="button" hidden>分析所有「待分析」頁面</button>
+      <button id="queue-control" class="button secondary" type="button" hidden>繼續分析</button>
+      <button id="retry" class="button secondary" type="button" hidden>重試失敗</button>
+      <button id="organize-topics" class="button secondary wide-action" type="button" hidden>開啟批次主題整理</button>
+    </section>
+
+    <section class="recent-section">
+      <div class="section-title">
+        <h2>最近結果</h2>
+        <button id="clear-recent" class="text-button" type="button">清除清單</button>
+      </div>
+      <div id="recent-list" class="recent-list">
+        <p class="empty">尚無分析紀錄</p>
+      </div>
+    </section>
+
+    <footer>文章分析只寫入標題、摘要、關鍵字與暫定主題；最終主題由單篇確認或批次整理另外處理。</footer>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

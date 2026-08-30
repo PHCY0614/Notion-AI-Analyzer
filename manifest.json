@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "minimum_chrome_version": "102",
+  "name": "Notion AI 分析工具",
+  "version": "0.6.1",
+  "description": "使用 Google AI Studio、Vertex AI 或 OpenRouter 分析 Notion 純文字文章。",
+  "permissions": [
+    "storage",
+    "alarms",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://api.notion.com/*",
+    "https://generativelanguage.googleapis.com/*",
+    "https://aiplatform.googleapis.com/*",
+    "https://openrouter.ai/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Notion AI 分析工具",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html"
+}
