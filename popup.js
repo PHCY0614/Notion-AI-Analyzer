@@ -19,6 +19,14 @@ const replacementTopic = document.querySelector("#replacement-topic");
 const customTopic = document.querySelector("#custom-topic");
 const rememberTopicMapping = document.querySelector("#remember-topic-mapping");
 
+// ==== Shared custom select ====
+/**
+ * Popup wrapper around AnalyzerSelect. Amber modifier, empty label
+ * 「請選擇主題」, and document mousedown/Escape listeners. Does not mirror
+ * native hidden/disabled onto the root (options page does). Returns the
+ * { sync, close } controller; renderTopicReview calls sync after rebuilding
+ * replacement options.
+ */
 function enhanceTopicSelect(select) {
   return AnalyzerSelect.enhance(select, {
     extraRootClass: "custom-select--amber",
@@ -48,6 +56,11 @@ let currentSurface = "other";
 let currentAction = "analyze";
 let queueControlAction = "resume";
 
+/**
+ * Maps INSPECT_PAGE status onto the current-page button. 分析失敗 → retry,
+ * 待主題整理 / 待主題確認 → review, 已分析 or analyzed → reanalyze, else
+ * analyze. Does not send messages.
+ */
 function currentPageAction(info) {
   if (!info) return { action: "analyze", label: "分析目前頁面" };
   if (info.status === "分析失敗") return { action: "retry", label: "重試目前頁面" };
@@ -57,6 +70,12 @@ function currentPageAction(info) {
   return { action: "analyze", label: "分析目前頁面" };
 }
 
+// ==== Background messaging ====
+/**
+ * chrome.runtime.sendMessage wrapper. Throws the background AppError
+ * message when ok is false. Popup state comes from GET_STATUS; configured
+ * comes from GET_CONFIG. Does not poll by itself.
+ */
 async function send(type, extra = {}) {
   const response = await chrome.runtime.sendMessage({ type, ...extra });
   if (!response?.ok) throw new Error(response?.error?.message || "操作失敗");
@@ -112,6 +131,13 @@ async function copyText(value) {
   }
 }
 
+// ==== Recent list ====
+/**
+ * Renders GET_STATUS.recent. Failed rows offer retry (REANALYZE_PAGE without
+ * force) and copy-log; others confirm then REANALYZE_PAGE with force.
+ * Non-failed rows confirm that existing AI 主題 will be cleared before
+ * REANALYZE_PAGE runs with force.
+ */
 function renderRecent(items) {
   if (!items?.length) {
     recentList.innerHTML = '<p class="empty">尚無分析紀錄</p>';
@@ -175,6 +201,14 @@ function renderRecent(items) {
   }));
 }
 
+// ==== Single-page topic review ====
+/**
+ * Shows or hides the single-page AI 暫定主題 review card from
+ * GET_STATUS.topicReview. existingTopics chips are already-confirmed /
+ * selected names, not remaining provisionals. Replacement options are
+ * sorted by closestExisting. 「這次暫不處理」 stays enabled unless
+ * canDiscard is false; that button sends skip, not discard.
+ */
 function renderTopicReview(review) {
   topicReview.hidden = !review;
   if (!review) {
@@ -247,6 +281,15 @@ function renderTopicReview(review) {
   buttons.approveTopic.disabled = actionBusy;
 }
 
+// ==== Status and toolbar ====
+/**
+ * Applies GET_STATUS to the popup. Reviewing, running/current/stage, paused
+ * queue, and currentSurface (single / database / other) control labels,
+ * hidden, and disabled. Topic review blocks batch/scan/retry/organize and
+ * current-page analyze/review. A live single_review run switches the current
+ * button to STOP_ANALYSIS. queueControl is shown on a database tab or
+ * whenever a batch is active, even on another tab.
+ */
 function renderStatus(state) {
   const running = Boolean(state.running || state.current || state.stage);
   const paused = Boolean(state.paused);
@@ -320,6 +363,13 @@ function renderStatus(state) {
     : pageAction.label;
 }
 
+// ==== Current-page inspection ====
+/**
+ * Classifies the active tab. Non-Notion stays surface other. A Notion URL
+ * is first treated as a database view, then INSPECT_PAGE; success becomes
+ * surface single with page info. Failure leaves surface database (batch
+ * buttons) and clears page info. INSPECT_PAGE goes through readyNotion.
+ */
 async function inspectCurrentPage() {
   currentPageInfo = null;
   currentSurface = "other";
@@ -338,6 +388,12 @@ async function inspectCurrentPage() {
   }
 }
 
+// ==== Polling and commands ====
+/**
+ * Loads GET_CONFIG and GET_STATUS. configured requires notionTarget, token,
+ * AI key, and activeModel. Does not re-inspect the tab. Polled every 1.5s
+ * while actionBusy is false.
+ */
 async function refresh() {
   try {
     const [config, state] = await Promise.all([send("GET_CONFIG"), send("GET_STATUS")]);
@@ -350,6 +406,12 @@ async function refresh() {
   }
 }
 
+/**
+ * Sends one command, disabling toolbar buttons until refresh. Re-inspects
+ * the tab after REVIEW_CURRENT_PAGE_TOPICS or RESOLVE_TOPIC_REVIEW. Current
+ * button: stop, review, reanalyze (force), or analyze/retry via
+ * REANALYZE_PAGE. #discard-topic sends RESOLVE_TOPIC_REVIEW action skip.
+ */
 async function runAction(type, extra = {}) {
   if (actionBusy) return;
   actionBusy = true;

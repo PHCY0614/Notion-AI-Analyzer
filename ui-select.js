@@ -8,6 +8,21 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function createAnalyzerSelect() {
   "use strict";
 
+  /**
+   * Wraps a native <select> in a BEM custom-select (trigger + listbox).
+   * extraRootClass is a modifier (popup amber vs options regular). emptyLabel
+   * shows when nothing is selected.
+   * sync() rebuilds the displayed value, trigger disabled state, options,
+   * selected checks, and optional native hidden/disabled mirroring.
+   * close() hides the menu and resets aria-expanded.
+   * Option click order is: set native select value → dispatch bubbling change →
+   * sync → close → restore trigger focus.
+   * Popup and options wrappers intentionally choose different document-listener
+   * and native-state behavior: popup sets attachDocumentListeners and leaves
+   * matchNativeState false; options sets matchNativeState and uses page-level
+   * document handlers plus onToggle, so attachDocumentListeners is false.
+   * Returns { sync, close }. Does not send Chrome messages.
+   */
   function enhance(select, options = {}) {
     const extraRootClass = options.extraRootClass || "";
     const emptyLabel = options.emptyLabel || "請選擇";
