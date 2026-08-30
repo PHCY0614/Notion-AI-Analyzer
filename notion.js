@@ -80,6 +80,16 @@
       .find(type => Object.prototype.hasOwnProperty.call(property, type)) || "";
   }
 
+  /**
+   * This module is the only payload layer that binds Chinese Notion property
+   * names, expected types, and 整理狀態 values. Builds a data-source schema
+   * PATCH plan. Conservative: never creates or type-converts 整理狀態; a
+   * missing, non-select, or 待分析-less 整理狀態 is an error for
+   * ensureSchema(). Missing AI 標題 / AI 主題 / AI 暫定主題 / AI 關鍵字 /
+   * AI 摘要 may be added. If 整理狀態 already has 待分析, missing other
+   * status options may be listed while existing option ids are kept. Wrong
+   * types on other properties are errors, not conversions.
+   */
   function schemaPlan(existingProperties = {}) {
     const required = analysisPropertySchema();
     const properties = {};
@@ -195,6 +205,13 @@
     return "default";
   }
 
+  /**
+   * Data-source schema PATCH for the AI 主題 multi_select option list.
+   * Preserves existing options by id (or name if id is absent). Deduplicates new
+   * topic names against existing options and earlier additions by topicKey.
+   * Does not write page properties, 整理狀態, or AI 暫定主題. Page helpers
+   * do not call this.
+   */
   function topicOptionsUpdatePayload(existingOptions = [], newTopics = []) {
     const existingKeys = new Set(
       (existingOptions ?? []).map(option => topicKey(option?.name)).filter(Boolean)
@@ -255,6 +272,14 @@
     }, []);
   }
 
+  /**
+   * Page PATCH after AI analysis. Writes AI 標題, AI 關鍵字, AI 摘要, and
+   * AI 暫定主題 (result.ai_topics joined by ｜ — not confirmed AI 主題) plus
+   * 整理狀態. Batch analysis passes clearFinalTopics false so confirmed
+   * AI 主題 is omitted and left unchanged. Single-page reanalysis passes true
+   * so AI 主題 is written as an empty multi_select, invalidating previous
+   * confirmed topics beside the new provisionals.
+   */
   function analysisDraftPayload(result, status = STATUS.topicOrganize, clearFinalTopics = false) {
     const properties = {
       [PROPERTY_NAMES.aiTitle]: { rich_text: richText(result.ai_title) },
@@ -269,6 +294,12 @@
     return { properties };
   }
 
+  /**
+   * Reads a full inspection/review page: id, title, url, AI 標題, confirmed
+   * AI 主題, AI 暫定主題, AI 關鍵字, and 整理狀態. Used by current-page
+   * inspect and single-page topic review, which need display fields the
+   * organizer loop does not. Keeps AI 主題 and AI 暫定主題 as separate lists.
+   */
   function pagePropertyValues(page) {
     const properties = page?.properties ?? {};
     const topics = properties[PROPERTY_NAMES.aiTopics]?.multi_select ?? [];
@@ -287,6 +318,12 @@
     };
   }
 
+  /**
+   * Narrow organizer/rollback page read: id, confirmed AI 主題, AI 暫定主題,
+   * and 整理狀態 only. Omits title, url, AI 標題, and AI 關鍵字 so apply and
+   * rollback loops depend only on taxonomy and status. Separate from
+   * pagePropertyValues so those callers cannot accidentally require UI fields.
+   */
   function topicOrganizerPageValues(page) {
     const properties = page?.properties ?? {};
     const topics = properties[PROPERTY_NAMES.aiTopics]?.multi_select ?? [];
@@ -308,6 +345,15 @@
     return payload;
   }
 
+  /**
+   * Page PATCH that always replaces confirmed AI 主題 from `topics` and
+   * writes 整理狀態. AI 暫定主題 is replaced only when provisionalTopics is an
+   * array (including [] to clear it). A non-array (null, used by rollback
+   * when current provisionals no longer match the snapshot) omits that
+   * property so current AI 暫定主題 is left unchanged. Multi-select values
+   * prefer existing option ids, else names; this is a page write, not a
+   * data-source option-schema PATCH.
+   */
   function topicApplyPayload(topics, status, existingTopicOptions = [], provisionalTopics = null) {
     const properties = {
       [PROPERTY_NAMES.aiTopics]: { multi_select: topicMultiSelect(topics, existingTopicOptions, topics) },
@@ -321,6 +367,10 @@
     return { properties };
   }
 
+  /**
+   * Page PATCH that writes only 整理狀態. Rejects names outside STATUS.
+   * Does not touch confirmed AI 主題 or AI 暫定主題.
+   */
   function statusUpdatePayload(status) {
     if (!Object.values(STATUS).includes(status)) throw new Error(`未知的整理狀態：${status}`);
     return {
@@ -376,6 +426,13 @@
     }).join("");
   }
 
+  /**
+   * Converts one Notion block into a plain-text record for the AI article.
+   * Maps headings, lists, quotes, and similar types to a single cleaned line;
+   * image/video/audio/file/pdf/unsupported are ignored. Does not walk children; the
+   * caller recurses and passes depth for list indent. Returns null for a
+   * non-object block.
+   */
   function blockToRecord(block, depth = 0) {
     if (!block || typeof block !== "object") return null;
     const type = block.type;
@@ -418,6 +475,12 @@
       || plain === "附件沒有可擷取的文字。";
   }
 
+  /**
+   * Joins blockToRecord lines into the normalized article string the AI layer
+   * receives. Drops ignored records, empty lines, and capture-extension
+   * metadata (擷取提醒 and empty-content notices). Consecutive dividers
+   * collapse to one. Does not read Notion properties or call AI.
+   */
   function buildArticleText(records) {
     const lines = [];
     for (const record of records ?? []) {
