@@ -1952,6 +1952,18 @@ function previewDictionaryImport(value, config) {
 }
 
 // ==== Pending-page scanning ====
+/**
+ * Discovers Notion pages in 待分析 and 分析失敗 so the UI and batch queue
+ * know what work exists. Used by the explicit scan flow, and by queueAll when
+ * no fresh pending-scan cache is available. May update missing data source
+ * schema through readyNotion; queries pending and failed pages. Does not call
+ * AI or write analysis properties to article pages. Updates failed, recent,
+ * knownPending, lastScanAt, pendingScan, databaseCheck, lastError, and stage.
+ * Only a paused batch that already has queued work has its queue replaced;
+ * otherwise the queue is cleared when nothing is in flight. Refuses to run
+ * while an unpaused batch is actively processing. Status queries are bounded
+ * by a 90s cancellation timeout.
+ */
 async function scanPending() {
   if (stateCache.mode === "batch" && !stateCache.paused
     && Boolean(stateCache.running || stateCache.current || stateCache.queue.length)) {
@@ -2070,6 +2082,14 @@ async function readPageRecords(pageId, token, signal) {
   return records;
 }
 
+/**
+ * Asks the configured AI provider for a structured article analysis and
+ * validates the JSON. One repair request is sent if the first payload is
+ * fixable. Does not read or write Notion. Validation updates the processing stage
+ * through setStage; this function does not own queue mutation. AbortError and
+ * AppError propagate to processItem, which owns pause, requeue, and failure
+ * recording. Used for both direct articles and the final merge of chunk notes.
+ */
 async function generateAndValidate(
   sourcePrompt,
   provider,
@@ -2162,6 +2182,13 @@ async function generateAndValidate(
   return checkedRepair.value;
 }
 
+/**
+ * Summarizes one chunk of a long article into notes for a later
+ * generateAndValidate merge. Calls the AI provider (initial attempt plus one
+ * repair). No Notion I/O. Validation updates the processing stage through
+ * setStage; this function does not own queue mutation. Invoked only from
+ * analyzeArticle when the article exceeds the provider's direct-text limit.
+ */
 async function extractChunkNote(chunk, index, total, provider, model, apiKey, signal, requestTimeoutMinutes) {
   let payload = G.buildChunkRequest(chunk, index, total, model);
   let lastError = null;
@@ -2201,6 +2228,13 @@ async function extractChunkNote(chunk, index, total, provider, model, apiKey, si
   });
 }
 
+/**
+ * Turns page plain text into validated title, keywords, summary, and
+ * provisional topics (AI 暫定主題). Sits between page read and Notion write
+ * inside processItem. Calls the AI provider; does not touch Notion or the
+ * queue. Short articles use generateAndValidate once. Longer ones extract
+ * per-chunk notes first, then run generateAndValidate on those notes.
+ */
 async function analyzeArticle(articleText, config, signal) {
   const { apiKey, model, provider } = await activeAiContext(config);
   const excludedPersonTerms = normalizeExcludedPersonTerms(config.excludedPersonTerms);
@@ -2332,6 +2366,11 @@ function publicStatus() {
 }
 
 // ==== Queue processing ====
+/**
+ * Wakes the service worker so processOne can drain the local queue. Uses both
+ * chrome.alarms and a short setTimeout in case the worker sleeps. Does not
+ * call AI or Notion; processOne still decides whether an item may run.
+ */
 function scheduleProcessing(delay = 200) {
   chrome.alarms.create(PROCESS_ALARM, { when: Date.now() + Math.max(50, delay) });
   setTimeout(() => { void processOne(); }, Math.max(25, Math.min(delay, 500)));
@@ -2391,6 +2430,26 @@ async function recordFailure(item, error, token) {
   decrementKnownPending(item);
 }
 
+/**
+ * Runs the per-page pipeline for one queued item: mark 分析中, read blocks,
+ * call AI, write the analysis draft, then record success or classify the error.
+ *
+ * Writes AI 標題, AI 關鍵字, AI 摘要, and AI 暫定主題. The batch path sets
+ * 整理狀態 to 待主題整理 and leaves confirmed AI 主題 unchanged so the topic
+ * organizer can apply taxonomy later. Single-page review (popup reanalysis)
+ * writes 待主題確認, clears confirmed AI 主題, and opens topicReview: reanalysis
+ * must invalidate previous final topics rather than leave stale confirmed
+ * values beside new provisionals.
+ *
+ * Mutates current, running, lastError, stage, and (on the single path)
+ * topicReview and paused; failed/recent/queue are updated through helpers.
+ * stopRequested is checked after the 分析中 write, after the page read, and
+ * after AI so a stop already requested at those boundaries is handled before
+ * the next processing phase. The abort path requeues the item and attempts to
+ * restore its Notion status to 待分析. Timeout, rate-limit, and setup errors
+ * also requeue and pause; other errors record 分析失敗. A queue/database
+ * mismatch drops the local queue without writing pages.
+ */
 async function processItem(item) {
   let token = "";
   const controller = new AbortController();
@@ -2546,6 +2605,12 @@ async function processItem(item) {
   }
 }
 
+/**
+ * Serial worker that takes at most one queue item. Skips when paused, already
+ * running, empty, or waiting on topicReview. After processItem, schedules the
+ * next item unless paused. An unexpected throw requeues that item and pauses
+ * so the rest of the batch does not continue blindly.
+ */
 async function processOne() {
   await initialize();
   if (processingPromise) return processingPromise;
@@ -3000,6 +3065,14 @@ async function resolveTopicReview(action, replacementTopic = "", customTopic = "
 }
 
 // ==== Queue commands ====
+/**
+ * User command to start a batch: reuses a pending scan no more than two
+ * minutes old, or calls scanPending. Notion readiness may update missing data
+ * source schema. Does not call AI or write analysis results to article pages.
+ * Blocked while a single-page topic review is open. When pages exist, enters
+ * batch mode, unpauses, stores knownPending, and schedules processOne. When
+ * no pages exist, returns idle and paused with the no-pending result.
+ */
 async function queueAll() {
   ensureNoTopicReview();
   const config = await readConfig();
@@ -3043,6 +3116,12 @@ async function queueAll() {
   return publicStatus();
 }
 
+/**
+ * User command to pause the batch. Sets paused and mode paused. For an
+ * in-flight item, sets stopRequested and aborts the active controller; the
+ * processItem abort path then requeues the item and attempts to restore 待分析.
+ * Does not itself guarantee that a draft write already in progress is skipped.
+ */
 async function stopAnalysis() {
   stateCache.paused = true;
   stateCache.stopRequested = Boolean(stateCache.current);
@@ -3052,6 +3131,11 @@ async function stopAnalysis() {
   return publicStatus();
 }
 
+/**
+ * User command to continue a paused batch. Blocked while topicReview is open.
+ * Clears pause, sets mode to batch, and schedules processOne when the queue
+ * still has items. Does not call AI or Notion.
+ */
 async function resumeAnalysis() {
   ensureNoTopicReview();
   stateCache.paused = false;
@@ -3062,6 +3146,13 @@ async function resumeAnalysis() {
   return publicStatus();
 }
 
+/**
+ * Rebuilds the queue from Notion pages marked 分析失敗 plus the local failed
+ * list, then starts a batch. readyNotion may update missing data source schema.
+ * Does not write analysis results to article pages or call AI until queued
+ * work reaches processItem. Blocked while topicReview is open. Clears the
+ * local failed list once those items are queued.
+ */
 async function retryFailed() {
   ensureNoTopicReview();
   const { config, token } = await readyNotion();
