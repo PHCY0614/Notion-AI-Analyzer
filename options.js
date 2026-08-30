@@ -622,13 +622,7 @@ document.querySelector("#preview-prompt").addEventListener("click", async () => 
   }
 });
 
-function renderOrganizer() {
-  topicGroups.replaceChildren();
-  const unclassified = organizerData?.unclassified ?? [];
-  const manualItems = organizerData?.manualItems ?? unclassified.map(name => ({ name, impactCount: 0 }));
-  if (!manualItems.some(item => item.name === manualCandidateName)) {
-    manualCandidateName = manualItems[0]?.name || "";
-  }
+function renderUnclassifiedPills(manualItems, unclassified) {
   unclassifiedTopics.replaceChildren(...manualItems.map(item => {
     const button = document.createElement("button");
     button.type = "button";
@@ -642,6 +636,9 @@ function renderOrganizer() {
   }));
   unclassifiedSummary.textContent = `本輪未分類 ${unclassified.length} 個暫定主題`;
   unclassifiedPanel.hidden = unclassified.length === 0;
+}
+
+function renderManualReviewPanel(manualItems) {
   const manualItem = manualItems.find(item => item.name === manualCandidateName);
   manualTopicReview.hidden = !manualItem;
   if (manualItem) {
@@ -663,100 +660,124 @@ function renderOrganizer() {
       manualExistingTopic.value = previousSelection;
     }
   }
+}
+
+function organizerSummaryText(unclassified) {
   if (!organizerData?.groups?.length) {
-    organizerSummary.textContent = organizerData?.status === "cleared"
+    return organizerData?.status === "cleared"
       ? "目前的整理建議已清除；Notion 主題、文章內容與本機主題字典都沒有變動。"
       : organizerData
       ? `已掃描 ${organizerData.pageCount} 篇頁面，讀取 ${organizerData.occurrenceCount} 次暫定主題（去重後 ${organizerData.candidateCount} 個）；${unclassified.length ? `本輪 ${unclassified.length} 個未找到合適分類。` : "目前沒有尚待確認的建議。"}`
       : "尚未產生建議。";
-    document.querySelector("#rollback-topics").disabled = !organizerData?.canRollback;
-    return;
   }
-  organizerSummary.textContent = `已掃描 ${organizerData.pageCount} 篇頁面，讀取 ${organizerData.occurrenceCount} 次暫定主題（去重後 ${organizerData.candidateCount} 個），尚有 ${organizerData.groups.length} 組建議待確認；本輪未分類 ${unclassified.length} 個。${organizerData.appliedCount ? ` 已套用 ${organizerData.appliedCount} 個暫定主題。` : ""}${organizerData.skippedCount ? ` 本次暫不處理 ${organizerData.skippedCount} 組。` : ""}`;
+  let text = `已掃描 ${organizerData.pageCount} 篇頁面，讀取 ${organizerData.occurrenceCount} 次暫定主題（去重後 ${organizerData.candidateCount} 個），尚有 ${organizerData.groups.length} 組建議待確認；本輪未分類 ${unclassified.length} 個。${organizerData.appliedCount ? ` 已套用 ${organizerData.appliedCount} 個暫定主題。` : ""}${organizerData.skippedCount ? ` 本次暫不處理 ${organizerData.skippedCount} 組。` : ""}`;
   if (organizerData.warnings?.length) {
-    organizerSummary.textContent += ` 另有 ${organizerData.warnings.length} 項安全提醒。`;
+    text += ` 另有 ${organizerData.warnings.length} 項安全提醒。`;
   }
   if (organizerData.progress) {
-    organizerSummary.textContent += ` 目前進度：${organizerData.progress.done}/${organizerData.progress.total}（${organizerData.status}）。`;
+    text += ` 目前進度：${organizerData.progress.done}/${organizerData.progress.total}（${organizerData.status}）。`;
   }
-  const cards = organizerData.groups.map(group => {
-    const card = document.createElement("article");
-    card.className = `topic-group${group.selected ? " selected" : ""}`;
-    const head = document.createElement("div");
-    head.className = "topic-group-head";
-    const selected = document.createElement("input");
-    selected.type = "checkbox";
-    selected.checked = Boolean(group.selected);
-    selected.addEventListener("change", () => {
-      group.selected = selected.checked;
-      if (selected.checked && !(group.selectedAliases ?? []).length) {
-        group.selectedAliases = [...(group.aliases ?? [])];
-        renderOrganizer();
-        return;
-      }
-      card.classList.toggle("selected", selected.checked);
-    });
-    const name = document.createElement("input");
-    name.type = "text";
-    name.value = group.standardTopic;
-    name.setAttribute("aria-label", "標準主題名稱");
-    name.addEventListener("input", () => { group.standardTopic = name.value.trim(); });
-    const confidence = document.createElement("span");
-    confidence.className = "confidence";
-    confidence.textContent = `${group.confidence === "high" ? "高" : group.confidence === "medium" ? "中" : "低"}信心`;
-    head.append(selected, name, confidence);
-    const reason = document.createElement("p");
-    reason.className = "hint";
-    reason.textContent = `建議說明：${group.reason || group.definition || "未提供說明"}`;
-    const source = document.createElement("p");
-    source.className = "topic-source";
-    source.textContent = (group.aliases ?? []).length > 1
-      ? "可合併為此分類的暫定主題（可分開勾選）"
-      : "建議加入此既有 AI 主題";
-    const aliasList = document.createElement("div");
-    aliasList.className = "alias-list";
-    const selectedAliasKeys = new Set((group.selectedAliases ?? []).map(topic => topic.normalize("NFKC").toLocaleLowerCase("zh-Hant-TW")));
-    aliasList.append(...(group.aliases ?? []).map(alias => {
-      const label = document.createElement("label");
-      const checkbox = document.createElement("input");
-      const key = alias.normalize("NFKC").toLocaleLowerCase("zh-Hant-TW");
-      checkbox.type = "checkbox";
-      checkbox.checked = selectedAliasKeys.has(key);
-      checkbox.addEventListener("change", () => {
-        if (checkbox.checked) selectedAliasKeys.add(key);
-        else selectedAliasKeys.delete(key);
-        group.selectedAliases = (group.aliases ?? []).filter(topic =>
-          selectedAliasKeys.has(topic.normalize("NFKC").toLocaleLowerCase("zh-Hant-TW"))
-        );
-      });
-      label.append(checkbox, document.createTextNode(alias));
-      return label;
-    }));
-    const separate = document.createElement("p");
-    separate.className = "hint topic-separate";
-    separate.textContent = (group.keepSeparate ?? []).length
-      ? `建議保持獨立：${group.keepSeparate.join("、")}`
-      : "";
-    separate.hidden = !(group.keepSeparate ?? []).length;
-    const impact = document.createElement("p");
-    impact.className = "hint topic-impact";
-    impact.textContent = `若套用，將更新 ${group.impactCount} 篇`;
-    const skip = document.createElement("button");
-    skip.type = "button";
-    skip.className = "text-button topic-skip";
-    skip.textContent = "暫不處理這個建議";
-    skip.addEventListener("click", async () => {
-      try {
-        organizerData = await send("SKIP_TOPIC_GROUP", { groupId: group.id, groups: organizerData.groups });
-        renderOrganizer();
-        showStatus("這次先不處理；下次重新掃描時仍可能以其他方向出現。", "info");
-      } catch (error) { showStatus(error.message, "error"); }
-    });
-    card.append(head, reason, source, aliasList, separate, impact, skip);
-    return card;
+  return text;
+}
+
+function updateRollbackButton() {
+  document.querySelector("#rollback-topics").disabled = !organizerData?.canRollback;
+}
+
+function renderOrganizerGroupCard(group) {
+  const card = document.createElement("article");
+  card.className = `topic-group${group.selected ? " selected" : ""}`;
+  const head = document.createElement("div");
+  head.className = "topic-group-head";
+  const selected = document.createElement("input");
+  selected.type = "checkbox";
+  selected.checked = Boolean(group.selected);
+  selected.addEventListener("change", () => {
+    group.selected = selected.checked;
+    if (selected.checked && !(group.selectedAliases ?? []).length) {
+      group.selectedAliases = [...(group.aliases ?? [])];
+      renderOrganizer();
+      return;
+    }
+    card.classList.toggle("selected", selected.checked);
   });
-  topicGroups.append(...cards);
-  document.querySelector("#rollback-topics").disabled = !organizerData.canRollback;
+  const name = document.createElement("input");
+  name.type = "text";
+  name.value = group.standardTopic;
+  name.setAttribute("aria-label", "標準主題名稱");
+  name.addEventListener("input", () => { group.standardTopic = name.value.trim(); });
+  const confidence = document.createElement("span");
+  confidence.className = "confidence";
+  confidence.textContent = `${group.confidence === "high" ? "高" : group.confidence === "medium" ? "中" : "低"}信心`;
+  head.append(selected, name, confidence);
+  const reason = document.createElement("p");
+  reason.className = "hint";
+  reason.textContent = `建議說明：${group.reason || group.definition || "未提供說明"}`;
+  const source = document.createElement("p");
+  source.className = "topic-source";
+  source.textContent = (group.aliases ?? []).length > 1
+    ? "可合併為此分類的暫定主題（可分開勾選）"
+    : "建議加入此既有 AI 主題";
+  const aliasList = document.createElement("div");
+  aliasList.className = "alias-list";
+  const selectedAliasKeys = new Set((group.selectedAliases ?? []).map(topic => topic.normalize("NFKC").toLocaleLowerCase("zh-Hant-TW")));
+  aliasList.append(...(group.aliases ?? []).map(alias => {
+    const label = document.createElement("label");
+    const checkbox = document.createElement("input");
+    const key = alias.normalize("NFKC").toLocaleLowerCase("zh-Hant-TW");
+    checkbox.type = "checkbox";
+    checkbox.checked = selectedAliasKeys.has(key);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) selectedAliasKeys.add(key);
+      else selectedAliasKeys.delete(key);
+      group.selectedAliases = (group.aliases ?? []).filter(topic =>
+        selectedAliasKeys.has(topic.normalize("NFKC").toLocaleLowerCase("zh-Hant-TW"))
+      );
+    });
+    label.append(checkbox, document.createTextNode(alias));
+    return label;
+  }));
+  const separate = document.createElement("p");
+  separate.className = "hint topic-separate";
+  separate.textContent = (group.keepSeparate ?? []).length
+    ? `建議保持獨立：${group.keepSeparate.join("、")}`
+    : "";
+  separate.hidden = !(group.keepSeparate ?? []).length;
+  const impact = document.createElement("p");
+  impact.className = "hint topic-impact";
+  impact.textContent = `若套用，將更新 ${group.impactCount} 篇`;
+  const skip = document.createElement("button");
+  skip.type = "button";
+  skip.className = "text-button topic-skip";
+  skip.textContent = "暫不處理這個建議";
+  skip.addEventListener("click", async () => {
+    try {
+      organizerData = await send("SKIP_TOPIC_GROUP", { groupId: group.id, groups: organizerData.groups });
+      renderOrganizer();
+      showStatus("這次先不處理；下次重新掃描時仍可能以其他方向出現。", "info");
+    } catch (error) { showStatus(error.message, "error"); }
+  });
+  card.append(head, reason, source, aliasList, separate, impact, skip);
+  return card;
+}
+
+function renderOrganizer() {
+  topicGroups.replaceChildren();
+  const unclassified = organizerData?.unclassified ?? [];
+  const manualItems = organizerData?.manualItems ?? unclassified.map(name => ({ name, impactCount: 0 }));
+  if (!manualItems.some(item => item.name === manualCandidateName)) {
+    manualCandidateName = manualItems[0]?.name || "";
+  }
+  renderUnclassifiedPills(manualItems, unclassified);
+  renderManualReviewPanel(manualItems);
+  if (!organizerData?.groups?.length) {
+    organizerSummary.textContent = organizerSummaryText(unclassified);
+    updateRollbackButton();
+    return;
+  }
+  organizerSummary.textContent = organizerSummaryText(unclassified);
+  topicGroups.append(...organizerData.groups.map(group => renderOrganizerGroupCard(group)));
+  updateRollbackButton();
 }
 
 async function resolveManualTopic(action) {
