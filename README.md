@@ -44,6 +44,23 @@ The extension reads plain text from pages in a selected Notion database, sends i
 4. Scan the accumulated provisional topics and generate organization suggestions.
 5. Review, edit, or discard the suggestions to complete the final taxonomy.
 
+## Installation
+
+This extension is not currently available on the Chrome Web Store and must be installed manually from GitHub.
+
+1. Download the latest version from the GitHub **Releases** page. If no release is available yet, select **Code → Download ZIP**.
+2. Extract the downloaded ZIP to a permanent folder.
+3. Enter `chrome://extensions` in the Chrome address bar.
+4. Enable **Developer mode** in the upper-right corner.
+5. Click **Load unpacked**.
+6. Select the extracted folder that contains `manifest.json`.
+7. Open the extension settings and enter your Notion Integration Token, Notion database URL or Data Source ID, and the API key for your selected AI provider.
+8. Click `測試連線並準備欄位` (“Test connections and prepare properties”) to complete the connection and database property setup.
+
+Before using the extension, make sure your Notion integration has been granted access to the target database.
+
+Versions installed manually from GitHub do not update automatically. After downloading a new version and replacing the existing files, return to `chrome://extensions` and click **Reload** on the extension card.
+
 ## Features
 
 ### Analyze the Current Page or Run a Batch
