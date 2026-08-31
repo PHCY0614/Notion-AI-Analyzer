@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "minimum_chrome_version": "102",
   "name": "Notion AI 分析工具",
-  "version": "0.6.1",
+  "version": "1.0.0",
   "description": "使用 Google AI Studio、Vertex AI 或 OpenRouter 分析 Notion 純文字文章。",
   "permissions": [
     "storage",
