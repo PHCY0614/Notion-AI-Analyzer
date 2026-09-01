@@ -13,15 +13,8 @@ const rememberGeminiKey = document.querySelector("#remember-gemini-key");
 const vertexKey = document.querySelector("#vertex-key");
 const vertexModel = document.querySelector("#vertex-model");
 const rememberVertexKey = document.querySelector("#remember-vertex-key");
-const openRouterKey = document.querySelector("#openrouter-key");
-const openRouterModel = document.querySelector("#openrouter-model");
-const rememberOpenRouterKey = document.querySelector("#remember-openrouter-key");
-const openRouterPaidRow = document.querySelector("#openrouter-paid-row");
-const openRouterPaidConfirmed = document.querySelector("#openrouter-paid-confirmed");
-const openRouterPriceWarning = document.querySelector("#openrouter-price-warning");
 const geminiSettings = document.querySelector("#gemini-settings");
 const vertexSettings = document.querySelector("#vertex-settings");
-const openRouterSettings = document.querySelector("#openrouter-settings");
 const excludedPersonTerms = document.querySelector("#excluded-person-terms");
 const analysisPrompt = document.querySelector("#analysis-prompt");
 const titleMax = document.querySelector("#title-max");
@@ -60,7 +53,6 @@ const importModeMenu = document.querySelector("#import-mode-menu");
 const importModeToggle = document.querySelector("#import-mode-toggle");
 const importSplitButton = document.querySelector("#import-split-btn");
 const enhancedSelects = new Map();
-let confirmedOpenRouterModel = "";
 let defaultAnalysisPrompt = "";
 let promptCustomized = false;
 let organizerData = null;
@@ -83,7 +75,7 @@ function closeEnhancedSelects(except = null) {
  */
 function enhanceSelect(select) {
   if (!select || enhancedSelects.has(select)) return enhancedSelects.get(select);
-  const extraRootClass = ["gemini-model", "vertex-model", "openrouter-model", "request-timeout", "manual-existing-topic"]
+  const extraRootClass = ["gemini-model", "vertex-model", "request-timeout", "manual-existing-topic"]
     .includes(select.id) ? "custom-select--regular" : "";
   const controller = AnalyzerSelect.enhance(select, {
     extraRootClass,
@@ -107,7 +99,6 @@ for (const select of [
   aiProvider,
   geminiModel,
   vertexModel,
-  openRouterModel,
   requestTimeout,
   manualExistingTopic
 ]) enhanceSelect(select);
@@ -187,9 +178,6 @@ function settingsFromForm() {
     geminiModel: geminiModel.value.trim(),
     vertexKey: vertexKey.value.trim(),
     vertexModel: vertexModel.value.trim(),
-    openRouterKey: openRouterKey.value.trim(),
-    openRouterModel: openRouterModel.value.trim(),
-    openRouterPaidConfirmed: openRouterPaidConfirmed.checked,
     excludedPersonTerms: excludedPersonTerms.value,
     preferExistingTopics: preferExistingTopics.checked,
     analysisPrompt: analysisPrompt.value,
@@ -200,7 +188,6 @@ function settingsFromForm() {
     notionToken: notionToken.value.trim(),
     rememberGeminiKey: rememberGeminiKey.checked,
     rememberVertexKey: rememberVertexKey.checked,
-    rememberOpenRouterKey: rememberOpenRouterKey.checked,
     rememberNotionToken: rememberNotionToken.checked
   };
 }
@@ -214,14 +201,13 @@ function settingsFromForm() {
  */
 function activeModelElement() {
   if (aiProvider.value === "vertex") return vertexModel;
-  if (aiProvider.value === "openrouter") return openRouterModel;
   return geminiModel;
 }
 
 /**
  * Shows the selected provider's key/model fields and hides the others, then
- * syncs enhanced selects and OpenRouter price UI. Sends no messages. Updates
- * gemini/vertex/openrouter settings and model-select hidden state, the
+ * syncs enhanced selects. Sends no messages. Updates Gemini/Vertex settings
+ * and model-select hidden state, the
  * load-models button label, and modelSummary. LIST_MODELS is sent by the
  * scan/load-models button; TEST_CONNECTIONS by the test button. Provider tests,
  * schema PATCHes, and AI calls stay in background.js.
@@ -230,57 +216,13 @@ function updateProviderUi() {
   const provider = aiProvider.value;
   geminiSettings.hidden = provider !== "gemini";
   vertexSettings.hidden = provider !== "vertex";
-  openRouterSettings.hidden = provider !== "openrouter";
   geminiModel.hidden = provider !== "gemini";
   vertexModel.hidden = provider !== "vertex";
-  openRouterModel.hidden = provider !== "openrouter";
   loadModelsButton.textContent = provider === "vertex" ? "載入建議模型" : "掃描可用模型";
-  modelSummary.textContent = provider === "openrouter"
-    ? "掃描會顯示適合文章分析、支援文字與結構化 JSON 的免費及付費模型。付費模型必須另外確認後才能儲存。"
-    : provider === "vertex"
+  modelSummary.textContent = provider === "vertex"
       ? "載入 Vertex AI 建議模型；按「測試連線並準備欄位」會使用免費的 Token 計數要求驗證所選模型與金鑰。"
       : "掃描會讀取這把 Google AI Studio Key 可見、支援純文字 generateContent 的模型。";
-  updateOpenRouterPriceUi(false);
   syncEnhancedSelects();
-}
-
-function formatUsd(value) {
-  if (!Number.isFinite(value)) return "價格未提供";
-  return `US$${new Intl.NumberFormat("en-US", { maximumFractionDigits: 4 }).format(value)}`;
-}
-
-/**
- * Updates the OpenRouter paid-confirmation row from the selected option's
- * dataset (isFree / prices). Sends no messages. Updates paid-row / warning
- * visibility, the confirmation checkbox, and the price warning text.
- * Clears or restores the checkbox when the model changes. Persistence is
- * SAVE_SETTINGS; provider tests, schema, and AI calls stay in background.js.
- */
-function updateOpenRouterPriceUi(modelChanged = false) {
-  const option = openRouterModel.selectedOptions[0];
-  const isFree = option?.dataset.isFree === "true"
-    || openRouterModel.value === "openrouter/free"
-    || openRouterModel.value.endsWith(":free");
-  const showPaid = aiProvider.value === "openrouter" && Boolean(openRouterModel.value) && !isFree;
-  openRouterPaidRow.hidden = !showPaid;
-  openRouterPriceWarning.hidden = !showPaid;
-  if (modelChanged && openRouterModel.value !== confirmedOpenRouterModel) {
-    openRouterPaidConfirmed.checked = false;
-  } else if (showPaid && openRouterModel.value === confirmedOpenRouterModel) {
-    openRouterPaidConfirmed.checked = true;
-  }
-  if (!showPaid) openRouterPaidConfirmed.checked = false;
-  if (showPaid) {
-    const prompt = Number(option?.dataset.promptPrice);
-    const completion = Number(option?.dataset.completionPrice);
-    const request = Number(option?.dataset.requestPrice);
-    const reasoning = Number(option?.dataset.reasoningPrice);
-    const extras = [
-      Number.isFinite(request) && request > 0 ? `每次要求 ${formatUsd(request)}` : "",
-      Number.isFinite(reasoning) && reasoning > 0 ? `推理 ${formatUsd(reasoning)}/百萬 Token` : ""
-    ].filter(Boolean).join("；");
-    openRouterPriceWarning.textContent = `目前標示價格：輸入 ${formatUsd(prompt)}/百萬 Token；輸出 ${formatUsd(completion)}/百萬 Token${extras ? `；${extras}` : ""}。實際價格以 OpenRouter 計費頁為準。`;
-  }
 }
 
 function setBusy(isBusy) {
@@ -301,17 +243,7 @@ function modelLabel(model) {
   const display = model.displayName && model.displayName !== model.name
     ? `${model.displayName}｜${model.name}`
     : model.name;
-  const paidExtras = [
-    Number.isFinite(model.requestPrice) && model.requestPrice > 0 ? `要求 ${formatUsd(model.requestPrice)}` : "",
-    Number.isFinite(model.reasoningPricePerMillion) && model.reasoningPricePerMillion > 0
-      ? `推理 ${formatUsd(model.reasoningPricePerMillion)}/M` : ""
-  ].filter(Boolean);
-  const pricing = model.isFree === true
-    ? "免費"
-    : Number.isFinite(model.promptPricePerMillion) || Number.isFinite(model.completionPricePerMillion)
-      ? `付費｜輸入 ${formatUsd(model.promptPricePerMillion)}/M｜輸出 ${formatUsd(model.completionPricePerMillion)}/M${paidExtras.length ? `｜${paidExtras.join("｜")}` : ""}`
-      : "";
-  return `${display}${recommended}${pricing ? `｜${pricing}` : ""}${limits ? `｜${limits}` : ""}`;
+  return `${display}${recommended}${limits ? `｜${limits}` : ""}`;
 }
 
 /**
@@ -325,14 +257,13 @@ function ensureModelOption(select, name, label = name) {
   const option = document.createElement("option");
   option.value = name;
   option.textContent = label;
-  option.dataset.isFree = String(name === "openrouter/free" || name.endsWith(":free"));
   select.append(option);
 }
 
 /**
  * Replaces one model <select> from a LIST_MODELS result array and syncs its
- * AnalyzerSelect. Sends no messages. Rebuilds options (including price
- * datasets), then selects previous value, else gemini-3.5-flash-lite, else
+ * AnalyzerSelect. Sends no messages. Rebuilds options, then selects the
+ * previous value, else gemini-3.5-flash-lite, else
  * the first model. The load-models click handler is what sends LIST_MODELS
  * after SAVE_SETTINGS. Provider tests, schema, and AI calls stay in
  * background.js.
@@ -342,11 +273,6 @@ function renderModels(select, models, selected) {
     const option = document.createElement("option");
     option.value = model.name;
     option.textContent = modelLabel(model);
-    option.dataset.isFree = String(model.isFree === true);
-    if (Number.isFinite(model.promptPricePerMillion)) option.dataset.promptPrice = String(model.promptPricePerMillion);
-    if (Number.isFinite(model.completionPricePerMillion)) option.dataset.completionPrice = String(model.completionPricePerMillion);
-    if (Number.isFinite(model.requestPrice)) option.dataset.requestPrice = String(model.requestPrice);
-    if (Number.isFinite(model.reasoningPricePerMillion)) option.dataset.reasoningPrice = String(model.reasoningPricePerMillion);
     return option;
   });
   select.replaceChildren(...options);
@@ -362,17 +288,14 @@ function renderModels(select, models, selected) {
 
 // ==== Settings form ====
 /**
- * SAVE_SETTINGS from the form. Local guards for empty target/model, OpenRouter
- * paid confirmation, and output-spec ranges run first. Secrets are not
+ * SAVE_SETTINGS from the form. Local guards for empty target/model and
+ * output-spec ranges run first. Secrets are not
  * written back into the inputs; placeholders show has*Key. Does not call
  * TEST_CONNECTIONS or ensureSchema.
  */
 async function saveSettings(showConfirmation = true) {
   if (!notionTarget.value.trim()) throw new Error("請填入 Notion 資料庫網址或 Data Source ID");
   if (!activeModelElement().value.trim()) throw new Error("請選擇分析模型");
-  if (aiProvider.value === "openrouter" && !openRouterPaidRow.hidden && !openRouterPaidConfirmed.checked) {
-    throw new Error("目前選擇的是 OpenRouter 付費模型，請先勾選費用確認");
-  }
   const outputSpec = normalizeFormOutputSpec(true);
   updateOutputSpecSummary();
   if (outputSpec.topicMin > outputSpec.topicMax) throw new Error("主題最少數不可大於主題最多數");
@@ -380,15 +303,12 @@ async function saveSettings(showConfirmation = true) {
   const config = await send("SAVE_SETTINGS", { settings: settingsFromForm() });
   topicOrganizerPreferences = config.preferExistingTopicsByDataSource ?? topicOrganizerPreferences;
   preferExistingTopics.checked = Boolean(config.preferExistingTopics);
-  confirmedOpenRouterModel = config.openRouterPaidConfirmed ? config.openRouterModel : "";
   notionToken.value = "";
   geminiKey.value = "";
   vertexKey.value = "";
-  openRouterKey.value = "";
   notionToken.placeholder = config.hasNotionToken ? "已設定（留白會保留）" : "secret_…";
   geminiKey.placeholder = config.hasGeminiKey ? "已設定（留白會保留）" : "AIza…";
   vertexKey.placeholder = config.hasVertexKey ? "已設定（留白會保留）" : "AIza…";
-  openRouterKey.placeholder = config.hasOpenRouterKey ? "已設定（留白會保留）" : "sk-or-v1-…";
   if (showConfirmation) {
     const queueNotice = config.databaseChanged
       ? ` 已切換資料庫${config.clearedQueueCount ? `，並清除 ${config.clearedQueueCount} 篇舊佇列` : ""}；開始前請掃描資料庫。`
@@ -413,15 +333,9 @@ async function loadConfig() {
     const selectedVertexModel = config.vertexModel || "gemini-3.5-flash-lite";
     ensureModelOption(vertexModel, selectedVertexModel);
     vertexModel.value = selectedVertexModel;
-    const selectedOpenRouterModel = config.openRouterModel || "openrouter/free";
-    ensureModelOption(openRouterModel, selectedOpenRouterModel);
-    openRouterModel.value = selectedOpenRouterModel;
-    confirmedOpenRouterModel = config.openRouterPaidConfirmed ? selectedOpenRouterModel : "";
-    openRouterPaidConfirmed.checked = Boolean(config.openRouterPaidConfirmed);
     rememberNotionToken.checked = Boolean(config.rememberNotionToken);
     rememberGeminiKey.checked = Boolean(config.rememberGeminiKey);
     rememberVertexKey.checked = Boolean(config.rememberVertexKey);
-    rememberOpenRouterKey.checked = Boolean(config.rememberOpenRouterKey);
     excludedPersonTerms.value = (config.excludedPersonTerms ?? []).join("\n");
     defaultAnalysisPrompt = config.defaultAnalysisPrompt || "";
     analysisPrompt.value = config.analysisPrompt || defaultAnalysisPrompt;
@@ -445,10 +359,11 @@ async function loadConfig() {
     notionToken.placeholder = config.hasNotionToken ? "已設定（留白會保留）" : "secret_…";
     geminiKey.placeholder = config.hasGeminiKey ? "已設定（留白會保留）" : "AIza…";
     vertexKey.placeholder = config.hasVertexKey ? "已設定（留白會保留）" : "AIza…";
-    openRouterKey.placeholder = config.hasOpenRouterKey ? "已設定（留白會保留）" : "sk-or-v1-…";
     updateProviderUi();
     syncEnhancedSelects();
-    updateOpenRouterPriceUi(false);
+    if (config.providerReselectionRequired) {
+      showStatus("舊版 AI 服務已移除。請選擇 Google AI Studio 或 Vertex AI，填入金鑰後儲存設定。", "info");
+    }
     organizerData = await send("GET_TOPIC_ORGANIZER");
     renderOrganizer();
   } catch (error) {
@@ -494,7 +409,7 @@ testButton.addEventListener("click", async () => {
     const ignoredNote = result.ignoredTopicCount
       ? `，另有 ${result.ignoredTopicCount} 個過長或格式不符的舊主題已忽略`
       : "";
-    const providerName = result.provider === "vertex" ? "Vertex AI" : result.provider === "openrouter" ? "OpenRouter" : "Google AI Studio";
+    const providerName = result.provider === "vertex" ? "Vertex AI" : "Google AI Studio";
     const pendingNote = result.hasPending ? "" : ` ${NO_PENDING_MESSAGE}`;
     showStatus(`連線成功。${changes}；目前有 ${result.topicCount} 個可用 AI 主題${ignoredNote}；${providerName} ${modelNote}。${pendingNote}`, result.selectedAvailable && result.hasPending ? "success" : "info");
   } catch (error) {
@@ -506,8 +421,7 @@ testButton.addEventListener("click", async () => {
 
 /**
  * SAVE_SETTINGS then LIST_MODELS. renderModels replaces options on the
- * active provider's model select and syncs its AnalyzerSelect; then
- * updateOpenRouterPriceUi refreshes paid-row state. Provider tests
+ * active provider's model select and syncs its AnalyzerSelect. Provider tests
  * (TEST_CONNECTIONS), schema PATCHes, and AI calls stay in background.js.
  */
 loadModelsButton.addEventListener("click", async () => {
@@ -519,7 +433,6 @@ loadModelsButton.addEventListener("click", async () => {
     const select = activeModelElement();
     const previous = select.value.trim();
     renderModels(select, result.models, previous);
-    updateOpenRouterPriceUi(false);
     modelSummary.textContent = `完成，共有 ${result.models.length} 個可選模型。目前選擇：${select.value}。`;
     showStatus(`已完整掃描 ${result.models.length} 個可用文字模型。選好後請按「儲存設定」。`, "success");
   } catch (error) {
@@ -537,17 +450,12 @@ clearButton.addEventListener("click", async () => {
     notionToken.value = "";
     geminiKey.value = "";
     vertexKey.value = "";
-    openRouterKey.value = "";
     notionToken.placeholder = "secret_…";
     geminiKey.placeholder = "AIza…";
     vertexKey.placeholder = "AIza…";
-    openRouterKey.placeholder = "sk-or-v1-…";
     rememberNotionToken.checked = false;
     rememberGeminiKey.checked = false;
     rememberVertexKey.checked = false;
-    rememberOpenRouterKey.checked = false;
-    confirmedOpenRouterModel = "";
-    updateOpenRouterPriceUi(false);
     showStatus("所有金鑰已清除。", "success");
   } catch (error) {
     showStatus(error.message, "error");
@@ -557,7 +465,6 @@ clearButton.addEventListener("click", async () => {
 });
 
 aiProvider.addEventListener("change", updateProviderUi);
-openRouterModel.addEventListener("change", () => updateOpenRouterPriceUi(true));
 
 // ==== Prompt and output-spec editing ====
 function currentOutputSpec() {

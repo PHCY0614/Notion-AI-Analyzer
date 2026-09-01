@@ -96,20 +96,73 @@ function formatTime(value) {
   }
 }
 
+function supportDiagnosticEnum(value, category = false) {
+  const text = String(value || "").slice(0, 100);
+  const allowed = new Set([
+    "BLOCKLIST", "HIGH", "IMAGE_PROHIBITED_CONTENT", "IMAGE_SAFETY", "LANGUAGE",
+    "LOW", "MALFORMED_FUNCTION_CALL", "MAX_TOKENS", "MEDIUM",
+    "MISSING_THOUGHT_SIGNATURE", "NEGLIGIBLE", "NO_IMAGE", "OTHER",
+    "PROHIBITED_CONTENT", "RECITATION", "SAFETY", "SPII", "STOP",
+    "TOO_MANY_TOOL_CALLS", "UNEXPECTED_TOOL_CALL"
+  ]);
+  return allowed.has(text) || (category && /^HARM_CATEGORY_[A-Z0-9_]+$/.test(text)) ? text : "";
+}
+
+function supportUsageMetadata(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const result = {};
+  for (const key of [
+    "cachedContentTokenCount", "candidatesTokenCount", "promptTokenCount",
+    "thoughtsTokenCount", "totalTokenCount", "toolUsePromptTokenCount"
+  ]) {
+    if (typeof value[key] === "number" && Number.isFinite(value[key])) result[key] = value[key];
+  }
+  if (["ON_DEMAND", "PROVISIONED_THROUGHPUT"].includes(value.trafficType)) {
+    result.trafficType = value.trafficType;
+  }
+  return Object.keys(result).length ? result : null;
+}
+
+function supportSafetyRatings(value) {
+  return (Array.isArray(value) ? value : []).slice(0, 20).map(rating => ({
+    blocked: Boolean(rating?.blocked),
+    category: supportDiagnosticEnum(rating?.category, true),
+    probability: supportDiagnosticEnum(rating?.probability),
+    probabilityScore: Number.isFinite(Number(rating?.probabilityScore))
+      ? Number(rating.probabilityScore) : null,
+    severity: supportDiagnosticEnum(rating?.severity),
+    severityScore: Number.isFinite(Number(rating?.severityScore))
+      ? Number(rating.severityScore) : null
+  }));
+}
+
 function failureLog(item) {
+  const diagnostic = item.diagnostic && typeof item.diagnostic === "object"
+    ? item.diagnostic
+    : {};
+  const attempts = (Array.isArray(diagnostic.attempts) ? diagnostic.attempts : [])
+    .slice(0, 4)
+    .map(attempt => ({
+      attempt: Number(attempt?.attempt) || null,
+      blockReason: supportDiagnosticEnum(attempt?.blockReason),
+      finishReason: supportDiagnosticEnum(attempt?.finishReason),
+      outputCharacterCount: Number(attempt?.outputCharacterCount) || 0,
+      safetyRatings: supportSafetyRatings(attempt?.safetyRatings),
+      usageMetadata: supportUsageMetadata(attempt?.usageMetadata)
+    }));
   return JSON.stringify({
     extensionVersion: chrome.runtime.getManifest().version,
-    page: {
-      id: item.id || "",
-      title: item.title || "未命名文章",
-      url: item.url || ""
-    },
     failure: {
       code: item.code || "",
-      error: item.error || "",
       failedAt: item.failedAt || ""
     },
-    ai: item.diagnostic || null
+    ai: {
+      attempts,
+      chunk: Number(diagnostic.chunk) || null,
+      model: String(diagnostic.model || "").slice(0, 200),
+      provider: ["gemini", "vertex"].includes(diagnostic.provider) ? diagnostic.provider : "",
+      validationErrorCount: Number(diagnostic.validationErrorCount) || 0
+    }
   }, null, 2);
 }
 
@@ -172,7 +225,7 @@ function renderRecent(items) {
       const copyLog = document.createElement("button");
       copyLog.className = "copy-log";
       copyLog.type = "button";
-      copyLog.textContent = "複製 Log";
+      copyLog.textContent = "複製安全 Log";
       copyLog.addEventListener("click", async () => {
         const original = copyLog.textContent;
         try {

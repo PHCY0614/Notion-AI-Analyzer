@@ -13,10 +13,18 @@ const STATE_KEY = "notionAiAnalyzerState";
 const NOTION_TOKEN_KEY = "notionAiAnalyzerNotionToken";
 const GEMINI_KEY_KEY = "notionAiAnalyzerGeminiKey";
 const VERTEX_KEY_KEY = "notionAiAnalyzerVertexKey";
-const OPENROUTER_KEY_KEY = "notionAiAnalyzerOpenRouterKey";
+// Retained only to erase credentials saved by older releases.
+const LEGACY_PROVIDER_KEY = "notionAiAnalyzerOpenRouterKey";
 const PROCESS_ALARM = "notion-ai-analyzer-process";
 const MAX_BLOCKS = 10000;
 const MAX_RECENT = 40;
+const MAX_FAILED_PAGES_TO_LOAD = 40;
+const MAX_STORED_PAGE_TITLE_CHARACTERS = N.MAX_STORED_PAGE_TITLE_CHARACTERS;
+const MAX_ARTICLE_CHARACTERS = 120000;
+const MAX_INPUT_TOKENS = 350000;
+const TOKEN_PREFLIGHT_CHARACTERS = 80000;
+const MAX_PENDING_PAGES = 2000;
+const MAX_PERSISTED_STATE_BYTES = 4 * 1024 * 1024;
 const CURRENT_PROMPT_VERSION = "2026-08-26-1";
 const TOPIC_ORGANIZER_CACHE_VERSION = 10;
 const TOPIC_ORGANIZER_BATCH_LIMIT = G.TOPIC_ORGANIZER_BATCH_LIMIT;
@@ -29,7 +37,6 @@ const REQUEUE_TIMEOUT_CODES = new Set([
 const RATE_LIMIT_CODES = new Set([
   "GEMINI_RATE_LIMIT",
   "VERTEX_RATE_LIMIT",
-  "OPENROUTER_RATE_LIMIT",
   "NOTION_RATE_LIMIT"
 ]);
 const SETUP_ERROR_CODES = new Set([
@@ -37,9 +44,7 @@ const SETUP_ERROR_CODES = new Set([
   "GEMINI_KEY_MISSING",
   "VERTEX_AUTH",
   "VERTEX_KEY_MISSING",
-  "OPENROUTER_AUTH",
-  "OPENROUTER_KEY_MISSING",
-  "OPENROUTER_PAID_CONFIRMATION_REQUIRED",
+  "AI_PROVIDER_RESELECTION_REQUIRED",
   "MODEL_INVALID",
   "MODEL_NOT_FOUND",
   "SCHEMA_INVALID",
@@ -63,13 +68,9 @@ const DEFAULT_CONFIG = Object.freeze({
   discardedTopicNames: [],
   excludedPersonTerms: DEFAULT_EXCLUDED_PERSON_TERMS,
   geminiModel: G.DEFAULT_MODEL,
-  openRouterModel: "openrouter/free",
-  openRouterFreeModelIds: ["openrouter/free"],
-  openRouterPaidConfirmedModel: "",
   vertexModel: "gemini-3.5-flash-lite",
   notionTarget: "",
   rememberGeminiKey: false,
-  rememberOpenRouterKey: false,
   rememberVertexKey: false,
   rememberNotionToken: false,
   requestTimeoutMinutes: 5,
@@ -77,7 +78,8 @@ const DEFAULT_CONFIG = Object.freeze({
   preferExistingTopicsByDataSource: {},
   topicAliases: {},
   topicPageResolutions: {},
-  topicDictionary: []
+  topicDictionary: [],
+  providerReselectionRequired: false
 });
 
 const DEFAULT_STATE = Object.freeze({
@@ -121,6 +123,31 @@ let preparedDataSourceId = "";
 // ==== Configuration normalization ====
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function sanitizeQueueItem(item = {}) {
+  const {
+    analyzedAt,
+    code,
+    diagnostic,
+    error,
+    failedAt,
+    outcome,
+    ...safe
+  } = item;
+  safe.title = S.cleanText(safe.title).slice(0, MAX_STORED_PAGE_TITLE_CHARACTERS);
+  if (typeof safe.url === "string") safe.url = safe.url.slice(0, 2000);
+  return safe;
+}
+
+function sanitizeHistoryItem(item = {}) {
+  return {
+    ...item,
+    title: S.cleanText(item.title).slice(0, MAX_STORED_PAGE_TITLE_CHARACTERS),
+    url: typeof item.url === "string" ? item.url.slice(0, 2000) : "",
+    error: S.truncateMessage(item.error || ""),
+    diagnostic: G.sanitizeDiagnostic(item.diagnostic)
+  };
 }
 
 function normalizeShortNameList(value) {
@@ -246,15 +273,30 @@ async function initialize() {
     } catch {
       // Older Chrome versions may not expose setAccessLevel. No untrusted context is used.
     }
+    await Promise.all([
+      chrome.storage.local.remove(LEGACY_PROVIDER_KEY),
+      chrome.storage.session.remove(LEGACY_PROVIDER_KEY)
+    ]);
     const stored = await chrome.storage.local.get(STATE_KEY);
     stateCache = {
       ...clone(DEFAULT_STATE),
       ...(stored[STATE_KEY] ?? {})
     };
-    stateCache.queue = Array.isArray(stateCache.queue) ? stateCache.queue : [];
-    stateCache.failed = Array.isArray(stateCache.failed) ? stateCache.failed : [];
-    stateCache.recent = Array.isArray(stateCache.recent) ? stateCache.recent : [];
+    stateCache.queue = uniqueItems(Array.isArray(stateCache.queue) ? stateCache.queue : [])
+      .slice(0, MAX_PENDING_PAGES);
+    stateCache.failed = (Array.isArray(stateCache.failed) ? stateCache.failed : [])
+      .slice(0, MAX_RECENT)
+      .map(sanitizeHistoryItem);
+    stateCache.recent = (Array.isArray(stateCache.recent) ? stateCache.recent : [])
+      .slice(0, MAX_RECENT)
+      .map(sanitizeHistoryItem);
+    if (stateCache.pendingScan?.pages) {
+      stateCache.pendingScan.pages = uniqueItems(stateCache.pendingScan.pages)
+        .slice(0, MAX_PENDING_PAGES);
+    }
     stateCache.topicReview = normalizeTopicReview(stateCache.topicReview);
+    const config = await readConfig();
+    if (config.providerReselectionRequired) await writeConfig(config);
     if (stateCache.topicOrganizer && stateCache.topicOrganizer.version !== TOPIC_ORGANIZER_CACHE_VERSION) {
       stateCache.topicOrganizer = null;
       stateCache.topicRollback = null;
@@ -289,6 +331,13 @@ async function initialize() {
       stateCache.stopRequested = false;
       stateCache.lastError = "上次處理在瀏覽器中斷，文章已放回本機佇列；按「繼續」即可重新分析。";
       await persistState();
+    } else if (config.providerReselectionRequired) {
+      stateCache.paused = true;
+      stateCache.running = false;
+      stateCache.stopRequested = false;
+      stateCache.mode = stateCache.queue.length ? "paused" : stateCache.mode;
+      stateCache.lastError = "舊版 AI 服務已移除。請到設定頁選擇 Google AI Studio 或 Vertex AI 並儲存後，再繼續分析。";
+      await persistState();
     } else if (!stateCache.paused && stateCache.queue.length) {
       scheduleProcessing(500);
     }
@@ -298,7 +347,15 @@ async function initialize() {
 
 async function readConfig() {
   const stored = await chrome.storage.local.get(CONFIG_KEY);
-  const merged = { ...clone(DEFAULT_CONFIG), ...(stored[CONFIG_KEY] ?? {}) };
+  const saved = stored[CONFIG_KEY] ?? {};
+  const legacyProvider = saved.aiProvider === "openrouter";
+  const merged = { ...clone(DEFAULT_CONFIG), ...saved };
+  merged.aiProvider = legacyProvider ? "gemini" : normalizeAiProvider(merged.aiProvider);
+  merged.providerReselectionRequired = legacyProvider || saved.providerReselectionRequired === true;
+  delete merged.openRouterModel;
+  delete merged.openRouterFreeModelIds;
+  delete merged.openRouterPaidConfirmedModel;
+  delete merged.rememberOpenRouterKey;
   merged.outputSpec = P.normalizeOutputSpec(merged.outputSpec);
   merged.discardedTopicNames = normalizeDiscardedTopicNames(merged.discardedTopicNames);
   merged.topicDictionary = normalizeTopicDictionary(merged.topicDictionary);
@@ -329,11 +386,59 @@ function normalizeTopicDictionary(value) {
 }
 
 async function writeConfig(config) {
-  await chrome.storage.local.set({ [CONFIG_KEY]: config });
+  const next = { ...config };
+  delete next.openRouterModel;
+  delete next.openRouterFreeModelIds;
+  delete next.openRouterPaidConfirmedModel;
+  delete next.rememberOpenRouterKey;
+  await chrome.storage.local.set({ [CONFIG_KEY]: next });
+}
+
+function persistedStateBytes(state) {
+  return new TextEncoder().encode(JSON.stringify({ [STATE_KEY]: state })).byteLength;
+}
+
+function compactStoredPageMetadata(item = {}) {
+  return {
+    ...item,
+    title: S.cleanText(item.title).slice(0, 120),
+    url: typeof item.url === "string" ? item.url.slice(0, 512) : ""
+  };
+}
+
+function rollbackSnapshotSize(snapshot) {
+  return persistedStateBytes({ ...stateCache, topicRollback: snapshot });
+}
+
+function assertRollbackSnapshotSize(snapshot) {
+  const bytes = rollbackSnapshotSize(snapshot);
+  if (bytes <= MAX_PERSISTED_STATE_BYTES) return;
+  throw new AppError("主題回復快照會超過 4 MiB 安全上限，已在寫入 Notion 前停止", {
+    code: "STATE_SIZE_LIMIT",
+    diagnostic: { stateBytes: bytes, stateLimitBytes: MAX_PERSISTED_STATE_BYTES }
+  });
 }
 
 async function persistState() {
   if (!stateCache) return;
+  let bytes = persistedStateBytes(stateCache);
+  if (bytes > MAX_PERSISTED_STATE_BYTES) {
+    stateCache.queue = stateCache.queue.map(compactStoredPageMetadata);
+    if (stateCache.pendingScan?.pages) {
+      stateCache.pendingScan.pages = stateCache.pendingScan.pages.map(compactStoredPageMetadata);
+    }
+    bytes = persistedStateBytes(stateCache);
+  }
+  if (bytes > MAX_PERSISTED_STATE_BYTES && stateCache.pendingScan) {
+    stateCache.pendingScan = null;
+    bytes = persistedStateBytes(stateCache);
+  }
+  if (bytes > MAX_PERSISTED_STATE_BYTES) {
+    throw new AppError("本機分析狀態超過 4 MiB 安全上限，已停止寫入；請清除近期紀錄後再重試", {
+      code: "STATE_SIZE_LIMIT",
+      diagnostic: { stateBytes: bytes, stateLimitBytes: MAX_PERSISTED_STATE_BYTES }
+    });
+  }
   await chrome.storage.local.set({ [STATE_KEY]: stateCache });
 }
 
@@ -359,13 +464,12 @@ async function storeSecret(key, suppliedValue, remember) {
 
 async function clearCredentials() {
   await Promise.all([
-    chrome.storage.local.remove([NOTION_TOKEN_KEY, GEMINI_KEY_KEY, VERTEX_KEY_KEY, OPENROUTER_KEY_KEY]),
-    chrome.storage.session.remove([NOTION_TOKEN_KEY, GEMINI_KEY_KEY, VERTEX_KEY_KEY, OPENROUTER_KEY_KEY])
+    chrome.storage.local.remove([NOTION_TOKEN_KEY, GEMINI_KEY_KEY, VERTEX_KEY_KEY, LEGACY_PROVIDER_KEY]),
+    chrome.storage.session.remove([NOTION_TOKEN_KEY, GEMINI_KEY_KEY, VERTEX_KEY_KEY, LEGACY_PROVIDER_KEY])
   ]);
   const config = await readConfig();
   config.rememberNotionToken = false;
   config.rememberGeminiKey = false;
-  config.rememberOpenRouterKey = false;
   config.rememberVertexKey = false;
   await writeConfig(config);
 }
@@ -388,45 +492,25 @@ async function requireVertexKey() {
   return key;
 }
 
-async function requireOpenRouterKey() {
-  const key = await readSecret(OPENROUTER_KEY_KEY);
-  if (!key) throw new AppError("尚未設定 OpenRouter API Key", { code: "OPENROUTER_KEY_MISSING" });
-  return key;
-}
-
 // ==== AI provider routing ====
 function normalizeAiProvider(value) {
-  return ["vertex", "openrouter"].includes(value) ? value : "gemini";
+  return value === "vertex" ? "vertex" : "gemini";
+}
+
+function assertProviderReady(config) {
+  if (!config.providerReselectionRequired) return;
+  throw new AppError("請先到設定頁選擇 Google AI Studio 或 Vertex AI 並儲存", {
+    code: "AI_PROVIDER_RESELECTION_REQUIRED"
+  });
 }
 
 async function activeAiContext(config) {
+  assertProviderReady(config);
   const provider = normalizeAiProvider(config.aiProvider);
   if (provider === "vertex") {
     return {
       apiKey: await requireVertexKey(),
       model: S.normalizeModelName(config.vertexModel) || "gemini-3.5-flash-lite",
-      provider
-    };
-  }
-  if (provider === "openrouter") {
-    const model = String(config.openRouterModel || "openrouter/free").trim();
-    if (model === "openrouter/free") {
-      throw new AppError("OpenRouter 免費隨機路由無法保證目前有端點支援嚴格 JSON。請到設定頁掃描模型，改選一個具體的免費或付費模型", {
-        code: "OPENROUTER_MODEL_INCOMPATIBLE"
-      });
-    }
-    const freeModels = new Set(Array.isArray(config.openRouterFreeModelIds)
-      ? config.openRouterFreeModelIds
-      : ["openrouter/free"]);
-    if (!freeModels.has(model) && !model.endsWith(":free")
-      && config.openRouterPaidConfirmedModel !== model) {
-      throw new AppError("所選 OpenRouter 模型可能產生費用，請回到設定頁確認價格並勾選費用確認", {
-        code: "OPENROUTER_PAID_CONFIRMATION_REQUIRED"
-      });
-    }
-    return {
-      apiKey: await requireOpenRouterKey(),
-      model,
       provider
     };
   }
@@ -616,124 +700,79 @@ async function vertexRequest(model, payload, options = {}) {
   });
 }
 
-function openRouterPayload(model, payload) {
-  const systemText = (payload?.systemInstruction?.parts ?? [])
-    .map(part => part?.text || "")
-    .join("\n")
-    .trim();
-  const userText = (payload?.contents ?? [])
-    .flatMap(content => content?.parts ?? [])
-    .map(part => part?.text || "")
-    .join("\n")
-    .trim();
-  const schema = payload?.generationConfig?.responseJsonSchema;
-  const body = {
-    model,
-    messages: [
-      ...(systemText ? [{ role: "system", content: systemText }] : []),
-      { role: "user", content: userText }
-    ],
-    max_tokens: Math.min(Number(payload?.generationConfig?.maxOutputTokens) || 4096, 8192),
-    stream: false
-  };
-  if (schema) {
-    body.response_format = {
-      type: "json_schema",
-      json_schema: {
-        name: "notion_ai_analysis",
-        strict: true,
-        schema
-      }
-    };
-    body.provider = { require_parameters: true };
-  }
-  return body;
+function payloadTextCharacters(value) {
+  if (typeof value === "string") return value.length;
+  if (Array.isArray(value)) return value.reduce((total, item) => total + payloadTextCharacters(item), 0);
+  if (!value || typeof value !== "object") return 0;
+  return Object.values(value).reduce((total, item) => total + payloadTextCharacters(item), 0);
 }
 
-function normalizeOpenRouterResponse(data) {
-  const choice = data?.choices?.[0] ?? {};
-  const content = typeof choice?.message?.content === "string"
-    ? choice.message.content
-    : Array.isArray(choice?.message?.content)
-      ? choice.message.content.map(part => part?.text || "").join("")
-      : "";
-  const refusal = choice?.message?.refusal || "";
-  return {
-    candidates: content ? [{
-      content: { parts: [{ text: content }] },
-      finishReason: choice.finish_reason || ""
-    }] : [],
-    modelVersion: data?.model || "",
-    promptFeedback: refusal ? { blockReason: refusal } : undefined,
-    usageMetadata: data?.usage ? {
-      promptTokenCount: data.usage.prompt_tokens ?? null,
-      candidatesTokenCount: data.usage.completion_tokens ?? null,
-      totalTokenCount: data.usage.total_tokens ?? null
-    } : null
-  };
+function assertArticleSize(articleText) {
+  if (articleText.length <= MAX_ARTICLE_CHARACTERS) return;
+  throw new AppError(`文章純文字共 ${articleText.length.toLocaleString()} 字元，超過 ${MAX_ARTICLE_CHARACTERS.toLocaleString()} 的安全上限`, {
+    code: "ARTICLE_TOO_LARGE",
+    diagnostic: {
+      articleCharacters: articleText.length,
+      articleCharacterLimit: MAX_ARTICLE_CHARACTERS
+    }
+  });
 }
 
-async function openRouterRequest(model, payload, options = {}) {
-  const apiKey = options.apiKey || await requireOpenRouterKey();
-  const safeModel = String(model || "").trim();
-  if (!/^[a-z0-9_.:-]+\/[a-z0-9_.:@/-]+$/i.test(safeModel)) {
-    throw new AppError("OpenRouter 模型名稱格式不正確", { code: "MODEL_INVALID" });
+async function assertAiInputTokenLimit(provider, model, payload, options = {}) {
+  const inputCharacters = payloadTextCharacters(payload);
+  if (inputCharacters < TOKEN_PREFLIGHT_CHARACTERS) return null;
+  const safeModel = S.normalizeModelName(model);
+  if (!safeModel) throw new AppError("AI 模型名稱格式不正確", { code: "MODEL_INVALID" });
+  const apiKey = options.apiKey || (provider === "vertex" ? await requireVertexKey() : await requireGeminiKey());
+  const url = provider === "vertex"
+    ? `https://aiplatform.googleapis.com/v1/publishers/google/models/${encodeURIComponent(safeModel)}:countTokens`
+    : `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(safeModel)}:countTokens`;
+  const body = provider === "vertex"
+    ? payload
+    : { generateContentRequest: { model: `models/${safeModel}`, ...payload } };
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey
+      },
+      body: JSON.stringify(body),
+      signal: options.signal
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") throw error;
+    throw new AppError("無法確認 AI 輸入 token 數，請檢查網路後再試", {
+      code: provider === "vertex" ? "VERTEX_NETWORK" : "GEMINI_NETWORK"
+    });
   }
-  let attempt = 0;
-  while (attempt < 3) {
-    let response;
-    try {
-      response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-          "X-OpenRouter-Title": "Notion AI Analyzer"
-        },
-        body: JSON.stringify(openRouterPayload(safeModel, payload)),
-        signal: options.signal
-      });
-    } catch (error) {
-      if (error?.name === "AbortError") throw error;
-      if (attempt >= 2) {
-        throw new AppError("無法連線到 OpenRouter，請檢查網路後再試", { code: "OPENROUTER_NETWORK" });
-      }
-      await abortableSleep(Math.min(2 ** attempt, 4) * 1000, options.signal);
-      attempt += 1;
-      continue;
-    }
-
-    const data = await readJsonResponse(response);
-    if (response.ok) return normalizeOpenRouterResponse(data);
-
-    if ([500, 502, 503, 504].includes(response.status) && attempt < 2) {
-      await abortableSleep(retryDelay(response, attempt), options.signal);
-      attempt += 1;
-      continue;
-    }
-    const message = errorMessage(data, `OpenRouter 錯誤 ${response.status}`);
-    let code = "OPENROUTER_API";
-    if (response.status === 429) code = "OPENROUTER_RATE_LIMIT";
-    else if ([401, 403].includes(response.status)) code = "OPENROUTER_AUTH";
-    else if (/no endpoints found.*requested parameters|requested parameters.*no endpoints found/i.test(message)) {
-      code = "OPENROUTER_MODEL_INCOMPATIBLE";
-    }
-    else if (response.status === 404) code = "MODEL_NOT_FOUND";
-    const userMessage = code === "OPENROUTER_MODEL_INCOMPATIBLE"
-      ? "所選 OpenRouter 模型目前沒有可處理嚴格 JSON 的端點。請重新掃描模型並改選其他項目"
-      : message;
-    throw new AppError(userMessage, {
+  const data = await readJsonResponse(response);
+  if (!response.ok) {
+    const prefix = provider === "vertex" ? "VERTEX" : "GEMINI";
+    const code = response.status === 429
+      ? `${prefix}_RATE_LIMIT`
+      : [400, 401, 403].includes(response.status) ? `${prefix}_AUTH` : `${prefix}_API`;
+    throw new AppError(errorMessage(data, `無法確認 AI 輸入 token 數（${response.status}）`), {
       code,
-      retryAfter: Number(response.headers.get("retry-after")) || 0,
       status: response.status
     });
   }
-  throw new AppError("OpenRouter 重試次數已用完", { code: "OPENROUTER_RETRY_EXHAUSTED" });
+  const totalTokens = Number(data?.totalTokens);
+  if (!Number.isFinite(totalTokens) || totalTokens < 0) {
+    throw new AppError("AI 未回傳可辨識的輸入 token 數", { code: "TOKEN_COUNT_INVALID" });
+  }
+  if (totalTokens > MAX_INPUT_TOKENS) {
+    throw new AppError(`完整 prompt 約 ${totalTokens.toLocaleString()} tokens，超過 ${MAX_INPUT_TOKENS.toLocaleString()} 的安全上限`, {
+      code: "AI_INPUT_TOKEN_LIMIT",
+      diagnostic: { inputCharacters, inputTokens: totalTokens, inputTokenLimit: MAX_INPUT_TOKENS }
+    });
+  }
+  return totalTokens;
 }
 
 async function aiRequest(provider, model, payload, options = {}) {
   if (provider === "vertex") return vertexRequest(model, payload, options);
-  if (provider === "openrouter") return openRouterRequest(model, payload, options);
   return geminiRequest(model, payload, options);
 }
 
@@ -811,72 +850,6 @@ function notionWriteWithTimeout(path, options, parentSignal) {
 }
 
 // ==== AI model discovery and connection diagnostics ====
-async function listOpenRouterModels(apiKey = "") {
-  const key = apiKey || await requireOpenRouterKey();
-  let response;
-  try {
-    response = await fetch("https://openrouter.ai/api/v1/models", {
-      headers: { "Authorization": `Bearer ${key}` }
-    });
-  } catch {
-    throw new AppError("無法連線到 OpenRouter，請檢查網路後再試", { code: "OPENROUTER_NETWORK" });
-  }
-  const data = await readJsonResponse(response);
-  if (!response.ok) {
-    throw new AppError(errorMessage(data, `OpenRouter 模型清單錯誤 ${response.status}`), {
-      code: [401, 403].includes(response.status) ? "OPENROUTER_AUTH" : "OPENROUTER_API",
-      status: response.status
-    });
-  }
-  const models = (data?.data ?? []).filter(model => {
-    if (model?.id === "openrouter/free") return false;
-    const parameters = model?.supported_parameters ?? [];
-    const outputs = model?.architecture?.output_modalities ?? ["text"];
-    const identity = `${model?.id || ""} ${model?.name || ""}`.toLocaleLowerCase("en-US");
-    const specialized = /(?:^|[\s/_.:@-])(?:code|coder|codex|codestral|devstral|starcoder|embedding|embed|rerank|ocr|imagen|imagegen|tts|speech|audio|music|video)(?:$|[\s/_.:@-])/i;
-    const contextLength = Number(model?.context_length);
-    return parameters.includes("structured_outputs")
-      && outputs.includes("text")
-      && !specialized.test(identity)
-      && (!Number.isFinite(contextLength) || contextLength >= 16000);
-  }).map(model => {
-    const promptPrice = Number(model?.pricing?.prompt);
-    const completionPrice = Number(model?.pricing?.completion);
-    const requestPrice = Number(model?.pricing?.request);
-    const reasoningPrice = Number(model?.pricing?.internal_reasoning);
-    const isFree = model?.id === "openrouter/free"
-      || (promptPrice === 0 && completionPrice === 0
-        && (!Number.isFinite(requestPrice) || requestPrice === 0)
-        && (!Number.isFinite(reasoningPrice) || reasoningPrice === 0));
-    const reasoningEfforts = Array.isArray(model?.reasoning?.supported_efforts)
-      ? model.reasoning.supported_efforts
-      : [];
-    const analysisRank = model?.reasoning?.mandatory
-      ? 30
-      : reasoningEfforts.some(effort => ["none", "minimal", "low"].includes(effort))
-        ? 0
-        : model?.reasoning?.default_enabled ? 20 : 10;
-    return {
-      analysisRank,
-      completionPricePerMillion: Number.isFinite(completionPrice) ? completionPrice * 1000000 : null,
-      displayName: model.name || model.id,
-      inputTokenLimit: Number(model.context_length) || null,
-      isFree,
-      name: model.id,
-      outputTokenLimit: Number(model?.top_provider?.max_completion_tokens) || null,
-      promptPricePerMillion: Number.isFinite(promptPrice) ? promptPrice * 1000000 : null,
-      reasoningPricePerMillion: Number.isFinite(reasoningPrice) ? reasoningPrice * 1000000 : null,
-      requestPrice: Number.isFinite(requestPrice) ? requestPrice : null,
-      thinking: false
-    };
-  });
-  return [...new Map(models.map(model => [model.name, model])).values()].sort((a, b) => {
-    if (a.isFree !== b.isFree) return a.isFree ? -1 : 1;
-    if (a.analysisRank !== b.analysisRank) return a.analysisRank - b.analysisRank;
-    return a.displayName.localeCompare(b.displayName);
-  });
-}
-
 function recommendedVertexModels() {
   return [
     { name: "gemini-3.7-flash", displayName: "Gemini 3.7 Flash", inputTokenLimit: null, outputTokenLimit: null },
@@ -1081,11 +1054,14 @@ async function readTopicOptions(config, token, signal) {
 
 async function queryPagesByStatus(dataSourceId, status, token, options = {}) {
   const pages = [];
+  const maxPages = Math.max(1, Number(options.maxPages) || MAX_PENDING_PAGES);
   let cursor = "";
   do {
+    const remaining = maxPages - pages.length;
+    if (remaining <= 0) break;
     const response = await notionRequest(`/v1/data_sources/${dataSourceId}/query`, {
       method: "POST",
-      body: N.queryPayload(status, cursor),
+      body: N.queryPayload(status, cursor, Math.min(100, remaining)),
       signal: options.signal,
       token
     });
@@ -1095,6 +1071,15 @@ async function queryPagesByStatus(dataSourceId, status, token, options = {}) {
       sourceStatus: status
     })));
     if (typeof options.onProgress === "function") await options.onProgress(pages.length, status);
+    if (pages.length >= maxPages && response.has_more) {
+      if (options.failOnLimit) {
+        throw new AppError(`「${status}」頁面超過 ${maxPages} 筆掃描上限，請先縮小待處理範圍`, {
+          code: "PAGE_SCAN_LIMIT_EXCEEDED",
+          diagnostic: { maxPages, status }
+        });
+      }
+      break;
+    }
     cursor = response.has_more ? response.next_cursor || "" : "";
   } while (cursor);
   return pages;
@@ -1273,7 +1258,6 @@ function mergeOrganizerGroups(inputGroups = []) {
 }
 
 function canRetryTopicOrganizerWithoutSchema(error) {
-  if (error?.code === "OPENROUTER_MODEL_INCOMPATIBLE") return true;
   if (Number(error?.status) !== 400) return false;
   return /invalid[_ ]argument|requested parameters|json|schema|max.?output.?tokens/i
     .test(String(error?.message || ""));
@@ -1713,6 +1697,7 @@ async function applyTopicOrganizerGroups(groupsInput = []) {
         .filter(name => !processedKeys.has(N.topicKey(name)));
       const status = unresolved.length ? N.STATUS.topicReview : N.STATUS.analyzed;
       let saved = snapshot.pages.find(item => item.id === page.id);
+      const savedBefore = saved ? clone(saved) : null;
       if (!saved) {
         saved = {
           id: page.id,
@@ -1727,6 +1712,13 @@ async function applyTopicOrganizerGroups(groupsInput = []) {
         saved.addedTopics = uniqueTopicNames([...(saved.addedTopics ?? []), ...additions]);
         saved.provisionalAfter = unresolved;
         saved.statusAfter = status;
+      }
+      try {
+        assertRollbackSnapshotSize(snapshot);
+      } catch (error) {
+        if (savedBefore) Object.assign(saved, savedBefore);
+        else snapshot.pages.pop();
+        throw error;
       }
       if (additions.length || current.status !== status || unresolved.length !== (current.provisionalTopics ?? []).length) {
         await notionRequest(`/v1/pages/${page.id}`, {
@@ -1745,6 +1737,7 @@ async function applyTopicOrganizerGroups(groupsInput = []) {
       await persistState();
     }
 
+    assertRollbackSnapshotSize(snapshot);
     config.topicDictionary = nextDictionary;
     await writeConfig(config);
     snapshot.incomplete = false;
@@ -1775,7 +1768,9 @@ async function applyTopicOrganizerGroups(groupsInput = []) {
     stateCache.mode = organizer.previousMode || "idle";
     stateCache.paused = organizer.previousPaused !== false;
   } catch (error) {
-    stateCache.topicRollback = snapshot;
+    if (rollbackSnapshotSize(snapshot) <= MAX_PERSISTED_STATE_BYTES) {
+      stateCache.topicRollback = snapshot;
+    }
     organizer.status = "error";
     stateCache.mode = organizer.previousMode || "idle";
     stateCache.lastError = isAbort(error)
@@ -1894,6 +1889,12 @@ async function resolveOrganizerUnclassified(candidateName, action, replacementTo
         statusBefore: current.status,
         statusAfter: status
       });
+      try {
+        assertRollbackSnapshotSize(snapshot);
+      } catch (error) {
+        snapshot.pages.pop();
+        throw error;
+      }
       await notionRequest(`/v1/pages/${cachedPage.id}`, {
         method: "PATCH",
         body: N.topicApplyPayload(finalTopics, status, options, unresolved),
@@ -1908,6 +1909,7 @@ async function resolveOrganizerUnclassified(candidateName, action, replacementTo
       await persistState();
     }
 
+    assertRollbackSnapshotSize(snapshot);
     if (selectedTopic) {
       config.topicDictionary = mergeDictionaryEntries(config.topicDictionary, [{
         name: selectedTopic,
@@ -1936,7 +1938,9 @@ async function resolveOrganizerUnclassified(candidateName, action, replacementTo
     stateCache.mode = "idle";
     stateCache.lastError = "";
   } catch (error) {
-    stateCache.topicRollback = snapshot;
+    if (rollbackSnapshotSize(snapshot) <= MAX_PERSISTED_STATE_BYTES) {
+      stateCache.topicRollback = snapshot;
+    }
     organizer.status = "error";
     stateCache.mode = "idle";
     throw error;
@@ -2095,8 +2099,17 @@ async function scanPending() {
   };
   const [pages, remoteFailed] = await withAbortTimeout(
     signal => Promise.all([
-      queryPagesByStatus(config.dataSourceId, N.STATUS.pending, token, { signal, onProgress }),
-      queryPagesByStatus(config.dataSourceId, N.STATUS.failed, token, { signal, onProgress })
+      queryPagesByStatus(config.dataSourceId, N.STATUS.pending, token, {
+        signal,
+        onProgress,
+        maxPages: MAX_PENDING_PAGES,
+        failOnLimit: true
+      }),
+      queryPagesByStatus(config.dataSourceId, N.STATUS.failed, token, {
+        signal,
+        onProgress,
+        maxPages: MAX_FAILED_PAGES_TO_LOAD
+      })
     ]),
     null,
     90000,
@@ -2207,11 +2220,16 @@ async function generateAndValidate(
   let errors = [];
   let firstResponse = null;
   const diagnostic = { attempts: [], model, provider };
+  const initialPayload = G.buildAnalysisRequest(sourcePrompt, model, analysisOptions);
+  if (analysisOptions.enforceInputLimit) {
+    await setStage("檢查 AI 輸入", { model, provider });
+    await assertAiInputTokenLimit(provider, model, initialPayload, { apiKey, signal });
+  }
   try {
     firstResponse = await timedAiRequest(
       provider,
       model,
-      G.buildAnalysisRequest(sourcePrompt, model, analysisOptions),
+      initialPayload,
       { apiKey, signal, timeoutMinutes: analysisOptions.requestTimeoutMinutes }
     );
     await setStage("驗證輸出", { model, provider });
@@ -2278,7 +2296,7 @@ async function generateAndValidate(
   if (!checkedRepair.ok) {
     throw new AppError(`AI 修正輸出仍未符合規則：${checkedRepair.errors.join("；")}`, {
       code: "OUTPUT_INVALID",
-      diagnostic: { ...diagnostic, validationErrors: checkedRepair.errors }
+      diagnostic: { ...diagnostic, validationErrorCount: checkedRepair.errors.length }
     });
   }
   return checkedRepair.value;
@@ -2345,13 +2363,8 @@ async function analyzeArticle(articleText, config, signal) {
     outputSpec: P.normalizeOutputSpec(config.outputSpec),
     requestTimeoutMinutes: Number(config.requestTimeoutMinutes) || 0
   };
-  const usesOpenRouterFreeRouter = provider === "openrouter" && model === "openrouter/free";
-  const directTextLimit = usesOpenRouterFreeRouter
-    ? 150000
-    : provider === "openrouter" ? 24000 : G.DIRECT_TEXT_LIMIT;
-  const chunkTextLimit = usesOpenRouterFreeRouter
-    ? 70000
-    : provider === "openrouter" ? 18000 : G.CHUNK_TEXT_LIMIT;
+  const directTextLimit = G.DIRECT_TEXT_LIMIT;
+  const chunkTextLimit = G.CHUNK_TEXT_LIMIT;
   if (articleText.length <= directTextLimit) {
     return generateAndValidate(
       P.buildArticlePrompt(articleText, [], true, excludedPersonTerms),
@@ -2362,7 +2375,7 @@ async function analyzeArticle(articleText, config, signal) {
       [],
       true,
       excludedPersonTerms,
-      analysisOptions
+      { ...analysisOptions, enforceInputLimit: true }
     );
   }
 
@@ -2396,11 +2409,13 @@ async function analyzeArticle(articleText, config, signal) {
 // ==== Queue state and UI-facing responses ====
 function uniqueItems(items) {
   const seen = new Set();
-  return (items ?? []).filter(item => {
-    if (!item?.id || seen.has(item.id)) return false;
+  const result = [];
+  for (const item of items ?? []) {
+    if (!item?.id || seen.has(item.id)) continue;
     seen.add(item.id);
-    return true;
-  });
+    result.push(sanitizeQueueItem(item));
+  }
+  return result.slice(0, MAX_PENDING_PAGES);
 }
 
 function publicTopicReview(review) {
@@ -2440,12 +2455,12 @@ function decrementKnownPending(item) {
 
 function recordSuccess(item, extra = {}) {
   stateCache.failed = stateCache.failed.filter(entry => entry.id !== item.id);
-  stateCache.recent = [{
-    ...item,
+  stateCache.recent = [sanitizeHistoryItem({
+    ...sanitizeQueueItem(item),
     analyzedAt: new Date().toISOString(),
     outcome: "success",
     ...extra
-  }, ...stateCache.recent.filter(entry => entry.id !== item.id)].slice(0, MAX_RECENT);
+  }), ...stateCache.recent.filter(entry => entry.id !== item.id)].slice(0, MAX_RECENT);
 }
 
 function publicStatus() {
@@ -2520,14 +2535,14 @@ async function recordFailure(item, error, token) {
     statusError = "；且目前沒有 Notion Token，無法寫入分析失敗狀態";
   }
   const failure = {
-    ...item,
+    ...sanitizeQueueItem(item),
     code: error.code || "APP_ERROR",
-    diagnostic: error.diagnostic || null,
+    diagnostic: G.sanitizeDiagnostic(error.diagnostic),
     error: `${S.truncateMessage(error.message || "未知錯誤")}${statusError}`,
     failedAt: new Date().toISOString()
   };
-  stateCache.failed = [failure, ...stateCache.failed.filter(entry => entry.id !== item.id)].slice(0, MAX_RECENT);
-  stateCache.recent = [{ ...failure, outcome: "failed" }, ...stateCache.recent.filter(entry => entry.id !== item.id)].slice(0, MAX_RECENT);
+  stateCache.failed = [sanitizeHistoryItem(failure), ...stateCache.failed.filter(entry => entry.id !== item.id)].slice(0, MAX_RECENT);
+  stateCache.recent = [sanitizeHistoryItem({ ...failure, outcome: "failed" }), ...stateCache.recent.filter(entry => entry.id !== item.id)].slice(0, MAX_RECENT);
   stateCache.lastError = failure.error;
   decrementKnownPending(item);
 }
@@ -2611,6 +2626,7 @@ async function processItem(item) {
     if (!articleText) {
       throw new AppError("頁面沒有可供分析的純文字內容", { code: "EMPTY_ARTICLE" });
     }
+    assertArticleSize(articleText);
     if (stateCache.stopRequested) throw new DOMException("已停止", "AbortError");
 
     await setStage("準備 AI", { pageId: item.id });
@@ -2685,13 +2701,6 @@ async function processItem(item) {
         token,
         { resetPage: !["NOTION_AUTH", "NOTION_TOKEN_MISSING"].includes(error.code) }
       );
-    } else if (error.code === "OPENROUTER_MODEL_INCOMPATIBLE") {
-      await requeueAndPause(
-        item,
-        `OpenRouter 模型不相容，佇列已暫停：${S.truncateMessage(error.message)}`,
-        token,
-        { resetPage: true }
-      );
     } else {
       await recordFailure(item, error, token);
     }
@@ -2754,32 +2763,23 @@ function resolveNotionTarget(settings, current) {
 }
 
 function resolveProviderSelection(settings, current) {
-  const aiProvider = normalizeAiProvider(settings.aiProvider ?? current.aiProvider);
-  const geminiModel = S.normalizeModelName(settings.geminiModel ?? current.geminiModel) || G.DEFAULT_MODEL;
-  const openRouterModel = String(settings.openRouterModel ?? current.openRouterModel ?? "openrouter/free").trim();
-  if (!/^[a-z0-9_.:-]+\/[a-z0-9_.:@/-]+$/i.test(openRouterModel)) {
-    throw new AppError("OpenRouter 模型名稱格式不正確", { code: "MODEL_INVALID" });
-  }
-  const knownFreeOpenRouterModels = new Set([
-    "openrouter/free",
-    ...(Array.isArray(current.openRouterFreeModelIds) ? current.openRouterFreeModelIds : [])
-  ]);
-  const openRouterModelIsFree = knownFreeOpenRouterModels.has(openRouterModel)
-    || openRouterModel.endsWith(":free");
-  if (aiProvider === "openrouter" && !openRouterModelIsFree
-    && settings.openRouterPaidConfirmed !== true
-    && current.openRouterPaidConfirmedModel !== openRouterModel) {
-    throw new AppError("這是 OpenRouter 付費模型。請勾選費用確認後再儲存", {
-      code: "OPENROUTER_PAID_CONFIRMATION_REQUIRED"
+  if (current.providerReselectionRequired && !Object.hasOwn(settings, "aiProvider")) {
+    throw new AppError("舊版 AI 服務已移除，請明確選擇 Google AI Studio 或 Vertex AI", {
+      code: "AI_PROVIDER_RESELECTION_REQUIRED"
     });
   }
+  const requestedProvider = settings.aiProvider ?? current.aiProvider;
+  if (!["gemini", "vertex"].includes(requestedProvider)) {
+    throw new AppError("AI 服務商僅支援 Google AI Studio 或 Vertex AI", {
+      code: "AI_PROVIDER_INVALID"
+    });
+  }
+  const aiProvider = requestedProvider;
+  const geminiModel = S.normalizeModelName(settings.geminiModel ?? current.geminiModel) || G.DEFAULT_MODEL;
   const vertexModel = S.normalizeModelName(settings.vertexModel ?? current.vertexModel) || "gemini-3.5-flash-lite";
   return {
     aiProvider,
     geminiModel,
-    knownFreeOpenRouterModels,
-    openRouterModel,
-    openRouterModelIsFree,
     vertexModel
   };
 }
@@ -2845,14 +2845,11 @@ function buildNextConfig(settings, current, resolved) {
     analysisPromptCustomized: promptSettings.analysisPromptCustomized,
     promptBaseVersion: CURRENT_PROMPT_VERSION,
     aiProvider: provider.aiProvider,
+    providerReselectionRequired: false,
     notionTarget,
     geminiModel: provider.geminiModel,
-    openRouterModel: provider.openRouterModel,
-    openRouterFreeModelIds: [...provider.knownFreeOpenRouterModels].slice(0, 500),
-    openRouterPaidConfirmedModel: provider.openRouterModelIsFree ? "" : provider.openRouterModel,
     vertexModel: provider.vertexModel,
     rememberGeminiKey: Boolean(settings.rememberGeminiKey),
-    rememberOpenRouterKey: Boolean(settings.rememberOpenRouterKey),
     rememberVertexKey: Boolean(settings.rememberVertexKey),
     rememberNotionToken: Boolean(settings.rememberNotionToken),
     requestTimeoutMinutes: promptSettings.requestTimeoutMinutes,
@@ -2903,17 +2900,15 @@ async function resetStateForDatabaseChange() {
 
 function buildSaveResponse(next, resolved) {
   const { clearedQueueCount, preferExistingTopics, provider, secrets, targetChanged } = resolved;
-  const { aiProvider, geminiModel, openRouterModel, openRouterModelIsFree, vertexModel } = provider;
-  const { hasGeminiKey, hasNotionToken, hasOpenRouterKey, hasVertexKey } = secrets;
+  const { aiProvider, geminiModel, vertexModel } = provider;
+  const { hasGeminiKey, hasNotionToken, hasVertexKey } = secrets;
   return {
     ...next,
     preferExistingTopics,
-    activeModel: aiProvider === "vertex" ? vertexModel : aiProvider === "openrouter" ? openRouterModel : geminiModel,
-    hasAiKey: aiProvider === "vertex" ? hasVertexKey : aiProvider === "openrouter" ? hasOpenRouterKey : hasGeminiKey,
+    activeModel: aiProvider === "vertex" ? vertexModel : geminiModel,
+    hasAiKey: aiProvider === "vertex" ? hasVertexKey : hasGeminiKey,
     hasGeminiKey,
     hasNotionToken,
-    hasOpenRouterKey,
-    openRouterPaidConfirmed: !openRouterModelIsFree,
     hasVertexKey,
     databaseChanged: targetChanged,
     clearedQueueCount
@@ -2922,7 +2917,7 @@ function buildSaveResponse(next, resolved) {
 
 /**
  * Persists options-page settings. Guard order: parse notionTarget, provider
- * and model (MODEL_INVALID, OPENROUTER_PAID_CONFIRMATION_REQUIRED), prompt
+ * and model (MODEL_INVALID), prompt
  * and timeout, then assertDatabaseChangeAllowed. All of those must pass
  * before storeSecret or writeConfig. A compact-UUID change versus the current
  * notionTarget or dataSourceId is a database change: the next config clears
@@ -2955,11 +2950,10 @@ async function saveSettings(settings) {
     provider,
     targetChanged
   });
-  const [hasNotionToken, hasGeminiKey, hasVertexKey, hasOpenRouterKey] = await Promise.all([
+  const [hasNotionToken, hasGeminiKey, hasVertexKey] = await Promise.all([
     storeSecret(NOTION_TOKEN_KEY, settings.notionToken, next.rememberNotionToken),
     storeSecret(GEMINI_KEY_KEY, settings.geminiKey, next.rememberGeminiKey),
-    storeSecret(VERTEX_KEY_KEY, settings.vertexKey, next.rememberVertexKey),
-    storeSecret(OPENROUTER_KEY_KEY, settings.openRouterKey, next.rememberOpenRouterKey)
+    storeSecret(VERTEX_KEY_KEY, settings.vertexKey, next.rememberVertexKey)
   ]);
   await writeConfig(next);
   const clearedQueueCount = targetChanged ? await resetStateForDatabaseChange() : 0;
@@ -2967,7 +2961,7 @@ async function saveSettings(settings) {
     clearedQueueCount,
     preferExistingTopics,
     provider,
-    secrets: { hasGeminiKey, hasNotionToken, hasOpenRouterKey, hasVertexKey },
+    secrets: { hasGeminiKey, hasNotionToken, hasVertexKey },
     targetChanged
   });
 }
@@ -2983,18 +2977,17 @@ async function saveSettings(settings) {
  */
 async function getConfigForUi() {
   const config = await readConfig();
-  const [notionToken, geminiKey, vertexKey, openRouterKey] = await Promise.all([
+  const [notionToken, geminiKey, vertexKey] = await Promise.all([
     readSecret(NOTION_TOKEN_KEY),
     readSecret(GEMINI_KEY_KEY),
-    readSecret(VERTEX_KEY_KEY),
-    readSecret(OPENROUTER_KEY_KEY)
+    readSecret(VERTEX_KEY_KEY)
   ]);
   const aiProvider = normalizeAiProvider(config.aiProvider);
   return {
     ...config,
     preferExistingTopics: topicOrganizerPreference(config),
     aiProvider,
-    activeModel: aiProvider === "vertex" ? config.vertexModel : aiProvider === "openrouter" ? config.openRouterModel : config.geminiModel,
+    activeModel: aiProvider === "vertex" ? config.vertexModel : config.geminiModel,
     analysisPrompt: config.analysisPromptCustomized ? config.analysisPrompt : P.DEFAULT_ANALYSIS_PROMPT,
     analysisPromptCustomized: Boolean(config.analysisPromptCustomized),
     defaultAnalysisPrompt: P.DEFAULT_ANALYSIS_PROMPT,
@@ -3005,12 +2998,9 @@ async function getConfigForUi() {
       config.outputSpec
     ),
     excludedPersonTerms: normalizeExcludedPersonTerms(config.excludedPersonTerms),
-    hasAiKey: aiProvider === "vertex" ? Boolean(vertexKey) : aiProvider === "openrouter" ? Boolean(openRouterKey) : Boolean(geminiKey),
+    hasAiKey: aiProvider === "vertex" ? Boolean(vertexKey) : Boolean(geminiKey),
     hasGeminiKey: Boolean(geminiKey),
     hasNotionToken: Boolean(notionToken),
-    hasOpenRouterKey: Boolean(openRouterKey),
-    openRouterPaidConfirmed: Boolean(config.openRouterModel)
-      && config.openRouterPaidConfirmedModel === config.openRouterModel,
     hasVertexKey: Boolean(vertexKey)
   };
 }
@@ -3018,9 +3008,8 @@ async function getConfigForUi() {
 /**
  * Options connection test. Goes through readyNotion, so it may PATCH missing
  * data-source schema and persist resolved ids; not read-only. Then contacts
- * only the configured AI provider: Vertex countTokens on the selected model,
- * OpenRouter model list (also writeConfig of openRouterFreeModelIds), or
- * Gemini model list. Queries whether any 待分析 page exists. No article
+ * only the configured AI provider: Vertex countTokens on the selected model
+ * or the Gemini model list. Queries whether any 待分析 page exists. No article
  * property writes. Missing pending pages set databaseCheck NO_PENDING_PAGES
  * with ready true and do not throw. Returns plan.added / plan.updated names.
  */
@@ -3033,12 +3022,6 @@ async function testConnections() {
     await testVertexModel(config);
     models = recommendedVertexModels();
     selectedAvailable = true;
-  } else if (provider === "openrouter") {
-    const apiKey = await requireOpenRouterKey();
-    models = await listOpenRouterModels(apiKey);
-    config.openRouterFreeModelIds = models.filter(model => model.isFree).map(model => model.name);
-    await writeConfig(config);
-    selectedAvailable = models.some(model => model.name === config.openRouterModel);
   } else {
     const apiKey = await requireGeminiKey();
     models = await listGeminiModels(apiKey);
@@ -3249,6 +3232,7 @@ async function resolveTopicReview(action, replacementTopic = "", customTopic = "
 async function queueAll() {
   ensureNoTopicReview();
   const config = await readConfig();
+  assertProviderReady(config);
   const cached = stateCache.pendingScan;
   const scannedAt = new Date(cached?.scannedAt || "").getTime();
   const cacheFresh = Number.isFinite(scannedAt)
@@ -3311,6 +3295,7 @@ async function stopAnalysis() {
  */
 async function resumeAnalysis() {
   ensureNoTopicReview();
+  assertProviderReady(await readConfig());
   stateCache.paused = false;
   stateCache.stopRequested = false;
   stateCache.mode = "batch";
@@ -3328,8 +3313,11 @@ async function resumeAnalysis() {
  */
 async function retryFailed() {
   ensureNoTopicReview();
+  assertProviderReady(await readConfig());
   const { config, token } = await readyNotion();
-  const remoteFailed = await queryPagesByStatus(config.dataSourceId, N.STATUS.failed, token);
+  const remoteFailed = await queryPagesByStatus(config.dataSourceId, N.STATUS.failed, token, {
+    maxPages: MAX_FAILED_PAGES_TO_LOAD
+  });
   const retryItems = uniqueItems([...remoteFailed, ...stateCache.failed]);
   if (!retryItems.length) {
     stateCache.lastError = "Notion 中目前沒有「分析失敗」的文章可重試。";
@@ -3463,6 +3451,7 @@ async function reviewCurrentPageTopics(pageId) {
  */
 async function reanalyzePage(pageId, force = false) {
   ensureNoTopicReview();
+  assertProviderReady(await readConfig());
   if (stateCache.running) throw new AppError("目前正在分析其他文章，請先停止或等候完成", { code: "BUSY" });
   const id = S.extractNotionId(pageId);
   if (!id) throw new AppError("頁面 ID 格式不正確", { code: "PAGE_ID_INVALID" });
@@ -3500,11 +3489,7 @@ async function handleMessage(message) {
       const provider = normalizeAiProvider(config.aiProvider);
       let models;
       if (provider === "vertex") models = recommendedVertexModels();
-      else if (provider === "openrouter") {
-        models = await listOpenRouterModels();
-        config.openRouterFreeModelIds = models.filter(model => model.isFree).map(model => model.name);
-        await writeConfig(config);
-      } else models = await listGeminiModels();
+      else models = await listGeminiModels();
       return {
         models,
         provider

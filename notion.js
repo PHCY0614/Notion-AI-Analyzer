@@ -12,6 +12,7 @@
   "use strict";
 
   const API_VERSION = "2026-03-11";
+  const MAX_STORED_PAGE_TITLE_CHARACTERS = 500;
   const PROPERTY_NAMES = Object.freeze({
     aiTitle: "AI 標題",
     aiTopics: "AI 主題",
@@ -306,8 +307,8 @@
     const status = properties[PROPERTY_NAMES.processingStatus]?.select?.name || "";
     return {
       id: page?.id ?? "",
-      title: pageTitle(page),
-      url: page?.url ?? "",
+      title: pageTitle(page).slice(0, MAX_STORED_PAGE_TITLE_CHARACTERS),
+      url: String(page?.url ?? "").slice(0, 2000),
       aiTitle: richTextPlain(properties[PROPERTY_NAMES.aiTitle]?.rich_text),
       aiTopics: topics.map(item => shared.cleanText(item?.name)).filter(Boolean),
       provisionalTopics: richTextPlain(properties[PROPERTY_NAMES.provisionalTopics]?.rich_text)
@@ -509,8 +510,8 @@
   function pageSummary(page) {
     return {
       id: page?.id ?? "",
-      title: pageTitle(page),
-      url: page?.url ?? "",
+      title: pageTitle(page).slice(0, MAX_STORED_PAGE_TITLE_CHARACTERS),
+      url: String(page?.url ?? "").slice(0, 2000),
       lastEditedTime: page?.last_edited_time ?? ""
     };
   }
@@ -518,6 +519,7 @@
   return Object.freeze({
     API_VERSION,
     EXPECTED_TYPES,
+    MAX_STORED_PAGE_TITLE_CHARACTERS,
     PROPERTY_NAMES,
     STATUS,
     STATUS_OPTIONS,

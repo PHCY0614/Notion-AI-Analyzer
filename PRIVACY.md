@@ -1,6 +1,6 @@
 # Privacy and data flow
 
-Last updated: August 30, 2026
+Last updated: September 1, 2026
 
 Developed and maintained by Penny Hsieh.
 
@@ -21,12 +21,12 @@ This extension must be used with the Notion web app in Google Chrome. It uses th
 
 Images, video, audio, files, and PDFs are not used as analysis input and are not sent to the AI provider.
 
-Chrome permissions are `storage`, `alarms`, and `activeTab`. Host permissions are limited to `https://api.notion.com/*`, `https://generativelanguage.googleapis.com/*`, `https://aiplatform.googleapis.com/*`, and `https://openrouter.ai/*`.
+Chrome permissions are `storage`, `alarms`, and `activeTab`. Host permissions are limited to `https://api.notion.com/*`, `https://generativelanguage.googleapis.com/*`, and `https://aiplatform.googleapis.com/*`.
 
 ## Where data is sent
 
 1. The extension calls `api.notion.com` directly to read the selected pages. The Notion token is sent in an HTTP header, not in the URL.
-2. For single-page and batch article analysis, the following are sent to the currently selected AI provider (Google AI Studio at `generativelanguage.googleapis.com`, Vertex AI at `aiplatform.googleapis.com`, or OpenRouter at `openrouter.ai`):
+2. For single-page and batch article analysis, the following are sent to the currently selected AI provider (Google AI Studio at `generativelanguage.googleapis.com` or Vertex AI at `aiplatform.googleapis.com`):
    - Notion page plain text
    - the analysis prompt you have configured
    - the output spec
@@ -37,7 +37,7 @@ Chrome permissions are `storage`, `alarms`, and `activeTab`. Host permissions ar
 4. Batch topic organizing sends only this batch’s distinct provisional topic (`AI 暫定主題`) names and optional existing confirmed AI topic (`AI 主題`) names. Page body, page title, AI title, summary, keywords, occurrence counts, co-occurrence, and impact counts are not sent for classification.
 5. Accepted results are written back to `api.notion.com`. Testing the connection, scanning, starting a queue, or opening the popup on a Notion page may PATCH missing AI properties and remaining status options only when `整理狀態` already exists, its type is select, and it includes the `待分析` option. User-created options are not deleted or renamed.
 
-The extension developer does not operate a separate intermediary server and the extension has no analytics or telemetry. With OpenRouter, OpenRouter forwards the request to the underlying model provider for the selected model, so both OpenRouter and that provider may process the article; their retention and data-use practices depend on the selected model and account settings. Google AI Studio and Vertex AI handling depends on the project, plan, and Google’s current terms.
+The extension developer does not operate a separate intermediary server and the extension has no analytics or telemetry. Google AI Studio and Vertex AI handling depends on the project, plan, and Google’s current terms.
 
 ### Google AI Studio unpaid service
 
@@ -50,10 +50,10 @@ Chrome extension storage holds:
 - General settings: Notion target ID, AI provider and model names, excluded-person terms, analysis prompt and output spec, global and per-page topic mappings, and whether to remember keys.
 - Run state: latest scanned pending page IDs, the local batch queue, recent results, errors, and pause state. After a successful rescan, the queue is cleared or synced to Notion’s current `待分析` set so stale items are not kept as work.
 - Topic dictionary and organizer session: standard topics, definitions, aliases, colors, enabled flags, permanently discarded provisional topic names, the current suggestion batch, unclassified / temporarily skipped items, and the last apply snapshot used for rollback. Dictionary export does not include keys, tokens, or article text.
-- Failure diagnostics: only on AI output failure, provider, model name, stop reason, token usage, safety categories, and at most 12,000 characters of the raw AI response. Logs do not include API keys, the Notion token, the full source article, request headers, or the full request body.
-- Keys: the Notion token and the three AI keys each have a separate “remember” option. They are kept in session storage by default; they are stored in local extension storage only if you explicitly choose to remember them.
+- Failure diagnostics: only on AI output failure, provider, model name, stop reason, numeric token usage, safety categories, output character count, and validation error count. The diagnostic field does not persist raw AI responses or validation-error text; a separate short user-facing failure message is retained for retry and troubleshooting.
+- Keys: the Notion token and the two AI keys each have a separate “remember” option. They are kept in session storage by default; they are stored in local extension storage only if you explicitly choose to remember them.
 
-Successful recent rows store page ID, title, URL, status, and time. Failed rows add the limited diagnostic above so you can copy a log. 「清除清單」 clears those detailed responses but keeps page IDs and short errors needed to retry. The options page can clear Notion and all AI keys. Uninstalling the extension removes its Chrome storage.
+Successful recent rows store page ID, title, URL, status, and time. Failed rows add the limited diagnostic above. The copied support log omits page ID, title, URL, error text, article text, and raw AI output. 「清除清單」 clears detailed recent responses but keeps page IDs and short errors needed to retry. Pending-page scans are capped at 2,000 pages, failed-page loads at 40 pages, stored page titles at 500 characters, and persisted run state at 4 MiB. The options page can clear Notion and all AI keys. Uninstalling the extension removes its Chrome storage.
 
 ## What this extension does not do
 
@@ -66,7 +66,7 @@ Successful recent rows store page ID, title, URL, status, and time. Failed rows 
 
 ## Your responsibilities
 
-Limit which pages the Notion Integration can access. Manage API keys, quotas, and deletion in Google Cloud, AI Studio, or OpenRouter. On a shared computer, do not remember keys, and clear them when you are done.
+Limit which pages the Notion Integration can access. Manage API keys, quotas, and deletion in Google Cloud or AI Studio. On a shared computer, do not remember keys, and clear them when you are done.
 
 ## Contact
 

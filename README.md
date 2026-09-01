@@ -13,7 +13,7 @@ The user interface is written in Traditional Chinese and localized for users in 
 - Google Chrome and the Notion web app
 - A Notion database used to store the articles
 - A Notion Integration Token with access to that database
-- An API key for Google AI Studio, Vertex AI, or OpenRouter
+- An API key for Google AI Studio or Vertex AI
 
 The extension is configured for a specific Notion database and analyzes pages that belong to that database. It must be used with the Notion web app in Chrome and does not operate directly in the Notion desktop or mobile apps.
 
@@ -65,9 +65,11 @@ Versions installed manually from GitHub do not update automatically. After downl
 
 ### Analyze the Current Page or Run a Batch
 
-On an individual Notion page, you can analyze the page currently open in the browser. On a database page, you can scan all pages marked `待分析` and process them as a batch.
+On an individual Notion page, you can analyze the page currently open in the browser. On a database page, you can scan pages marked `待分析` and process them as a batch.
 
 While a batch is running, the popup shows the number of pending pages, items in the local queue, and failed analyses. You can stop or resume the batch and retry failed items. Moving between Notion pages does not interrupt an active queue.
+
+One scan accepts at most 2,000 pending pages. If the database contains more, the extension stops before creating a partial queue and asks you to narrow the pending set. Retrying failed analyses loads at most 40 failed pages at a time.
 
 <p align="center">
   <img src="docs/images/batch-analysis.png" alt="Batch analysis and queue controls in the extension popup" width="380">
@@ -123,7 +125,6 @@ The extension currently supports:
 
 - Google AI Studio
 - Vertex AI
-- OpenRouter
 
 You choose the provider and model. Article content is sent only to the provider currently selected and is not sent to the other supported providers.
 
@@ -145,6 +146,8 @@ The default values and supported ranges are:
 The minimum number of provisional topics cannot exceed the maximum. The minimum summary length also cannot exceed the maximum summary length.
 
 These settings are applied to the AI prompt, output format, and result validation so that generated content follows the selected specification.
+
+For safety and predictable resource use, article plain text is limited to 120,000 characters. Near that limit, the extension asks the selected Google service to count the complete prompt and rejects requests above 350,000 input tokens. Generated responses are capped at 8,192 tokens.
 
 ### Customize the Analysis Prompt
 

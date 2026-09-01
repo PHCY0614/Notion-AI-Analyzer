@@ -1,6 +1,6 @@
 # 隱私與資料流說明
 
-最後更新：2026-08-30
+最後更新：2026-09-01
 
 開發與維護：Penny Hsieh
 
@@ -21,12 +21,12 @@
 
 圖片、影片、音訊、檔案與 PDF 不會被讀成分析內容，也不會送往 AI 服務商。
 
-Chrome 權限為 `storage`、`alarms`、`activeTab`。主機權限僅限 `https://api.notion.com/*`、`https://generativelanguage.googleapis.com/*`、`https://aiplatform.googleapis.com/*`、`https://openrouter.ai/*`。
+Chrome 權限為 `storage`、`alarms`、`activeTab`。主機權限僅限 `https://api.notion.com/*`、`https://generativelanguage.googleapis.com/*`、`https://aiplatform.googleapis.com/*`。
 
 ## 資料傳送方向
 
 1. 擴充功能直接連接 `api.notion.com` 讀取指定頁面。Notion Token 放在 HTTP 標頭，不放在網址。
-2. 單篇與批次文章分析時，會將下列內容送給目前選擇的 AI 服務商（Google AI Studio 的 `generativelanguage.googleapis.com`、Vertex AI 的 `aiplatform.googleapis.com`，或 OpenRouter 的 `openrouter.ai`）：
+2. 單篇與批次文章分析時，會將下列內容送給目前選擇的 AI 服務商（Google AI Studio 的 `generativelanguage.googleapis.com` 或 Vertex AI 的 `aiplatform.googleapis.com`）：
    - Notion 頁面純文字
    - 使用者設定的分析提示詞
    - 輸出規格
@@ -37,7 +37,7 @@ Chrome 權限為 `storage`、`alarms`、`activeTab`。主機權限僅限 `https:
 4. 使用批次主題整理時，只傳送本批不重複的暫定主題（`AI 暫定主題`）名稱與可參考的既有 `AI 主題` 名稱。文章正文、頁面名稱、AI 標題、AI 摘要、AI 關鍵字、使用次數、共同出現關係與影響篇數都不會送入主題分類判斷。
 5. 合格結果由擴充功能直接寫回 `api.notion.com`。測試連線、掃描、開始佇列，或在 Notion 頁面開啟 Popup 時，只有在 `整理狀態` 已存在、型別為 select，且包含 `待分析` 選項時，才可能 PATCH 補上缺少的 AI 欄位與其餘狀態選項；不會刪除或改名使用者自建的選項。
 
-擴充功能開發者沒有營運獨立的中介伺服器，本擴充功能也沒有分析追蹤或遙測。選擇 OpenRouter 時，OpenRouter 會依所選的具體模型將要求轉交底層模型供應商，因此 OpenRouter 與實際模型供應商都可能處理文章；其保存與資料使用方式依模型及帳戶設定而異。Google AI Studio 與 Vertex AI 的資料處理方式則依對應專案、方案與 Google 當下條款而異。
+擴充功能開發者沒有營運獨立的中介伺服器，本擴充功能也沒有分析追蹤或遙測。Google AI Studio 與 Vertex AI 的資料處理方式依對應專案、方案與 Google 當下條款而異。
 
 ### Google AI Studio 未付費服務
 
@@ -50,10 +50,10 @@ Chrome 權限為 `storage`、`alarms`、`activeTab`。主機權限僅限 `https:
 - 一般設定：Notion 目標 ID、AI 服務商與模型名稱、人物與代稱排除清單、分析提示詞與輸出規格、全域與單頁主題對照記憶及是否記住金鑰。
 - 處理狀態：最新掃描的待分析頁面 ID、批次分析的本機佇列、最近結果、錯誤訊息與暫停狀態。重新掃描成功後，佇列會依 Notion 最新的「待分析」集合清除或同步，不會把已失效的舊項目繼續當成待處理文章。
 - 主題字典與整理狀態：標準主題、定義、別名、顏色、是否啟用、永久捨棄的暫定主題名稱、當批整理建議、本輪未分類／暫時跳過項目及上一次套用的回復快照。匯出字典不包含金鑰、Token 或文章正文。
-- 失敗除錯紀錄：僅在 AI 輸出失敗時保存服務商、模型名稱、停止原因、Token 用量、安全分類與每次最多 12,000 字的原始 AI 回應。紀錄不包含 API Key、Notion Token、完整原文、請求標頭或完整請求內容。
-- 金鑰：Notion Token 與三家 AI 金鑰各有獨立的「記住」選項。預設保存在工作階段儲存空間；只有使用者明確勾選時才保存在本機儲存空間。
+- 失敗除錯紀錄：僅在 AI 輸出失敗時保存服務商、模型名稱、停止原因、數字形式的 Token 用量、安全分類、輸出字元數與驗證錯誤數量；診斷欄位不保存原始 AI 回應或驗證錯誤文字，另會保留供重試與排錯使用的簡短失敗訊息。
+- 金鑰：Notion Token 與兩家 AI 金鑰各有獨立的「記住」選項。預設保存在工作階段儲存空間；只有使用者明確勾選時才保存在本機儲存空間。
 
-成功紀錄只包含頁面 ID、標題、網址、狀態與時間。失敗紀錄會額外保存上述有限除錯資訊，方便使用者按「複製 Log」自行檢查。按「清除清單」會一併清除詳細回應，但保留可供重試的頁面 ID 與簡短錯誤。設定頁可清除 Notion 與所有 AI 金鑰，移除擴充功能也會移除其 Chrome 儲存資料。
+成功紀錄只包含頁面 ID、標題、網址、狀態與時間。失敗紀錄會額外保存上述有限除錯資訊；複製出的安全 Log 不含頁面 ID、標題、網址、錯誤文字、文章內容或原始 AI 回應。按「清除清單」會一併清除近期詳細紀錄，但保留可供重試的頁面 ID 與簡短錯誤。待分析掃描最多 2,000 頁、失敗頁面最多載入 40 頁、保存的頁面標題最多 500 字元，整體執行狀態最多 4 MiB。設定頁可清除 Notion 與所有 AI 金鑰，移除擴充功能也會移除其 Chrome 儲存資料。
 
 ## 不會進行的行為
 
@@ -66,7 +66,7 @@ Chrome 權限為 `storage`、`alarms`、`activeTab`。主機權限僅限 `https:
 
 ## 使用者責任
 
-請妥善限制 Notion Integration 能存取的頁面，並在 Google Cloud、AI Studio 或 OpenRouter 管理 API Key、額度與刪除。若電腦由多人共用，建議不要勾選記住金鑰，並在使用後清除金鑰。
+請妥善限制 Notion Integration 能存取的頁面，並在 Google Cloud 或 AI Studio 管理 API Key、額度與刪除。若電腦由多人共用，建議不要勾選記住金鑰，並在使用後清除金鑰。
 
 ## 聯絡
 

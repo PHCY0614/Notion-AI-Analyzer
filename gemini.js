@@ -17,7 +17,7 @@
   const DEFAULT_MODEL = "gemini-3.5-flash-lite";
   const DIRECT_TEXT_LIMIT = 180000;
   const CHUNK_TEXT_LIMIT = 78000;
-  const RAW_LOG_LIMIT = 12000;
+  const MAX_OUTPUT_TOKENS = 8192;
 
   function analysisJsonSchema(outputSpec = prompt.DEFAULT_OUTPUT_SPEC) {
     const spec = prompt.normalizeOutputSpec(outputSpec);
@@ -126,7 +126,10 @@
   function generationPayload(systemInstruction, userText, schema, options = {}) {
     const thinkingConfig = thinkingConfigForModel(options.model);
     const generationConfig = {
-      maxOutputTokens: options.maxOutputTokens ?? 8192,
+      maxOutputTokens: Math.min(
+        Math.max(1, Number(options.maxOutputTokens) || MAX_OUTPUT_TOKENS),
+        MAX_OUTPUT_TOKENS
+      ),
       responseJsonSchema: schema,
       responseMimeType: "application/json"
     };
@@ -151,7 +154,7 @@
    */
   function buildAnalysisRequest(userPrompt, model = DEFAULT_MODEL, options = {}) {
     return generationPayload(prompt.buildSystemPrompt(options.customPrompt, options.outputSpec), userPrompt, analysisJsonSchema(options.outputSpec), {
-      maxOutputTokens: 8192,
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
       model
     });
   }
@@ -180,7 +183,7 @@
       prompt.CHUNK_SYSTEM_PROMPT,
       prompt.buildChunkPrompt(chunkText, index, total),
       CHUNK_JSON_SCHEMA,
-      { maxOutputTokens: 12288, model }
+      { maxOutputTokens: MAX_OUTPUT_TOKENS, model }
     );
   }
 
@@ -212,7 +215,7 @@
       prompt.TOPIC_ORGANIZER_SYSTEM_PROMPT,
       prompt.buildTopicOrganizerPrompt(candidates, existingStandards, options.allCandidates ?? candidates, options),
       TOPIC_ORGANIZER_JSON_SCHEMA,
-      { maxOutputTokens: 8192, model }
+      { maxOutputTokens: MAX_OUTPUT_TOKENS, model }
     );
   }
 
@@ -238,7 +241,7 @@
         parts: [{ text: prompt.buildTopicOrganizerPrompt(candidates, existingStandards, options.allCandidates ?? candidates, options) }]
       }],
       generationConfig: {
-        maxOutputTokens: 8192,
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
         responseMimeType: "application/json",
         ...(thinkingConfig ? { thinkingConfig } : {})
       }
@@ -278,7 +281,7 @@
         ) }]
       }],
       generationConfig: {
-        maxOutputTokens: 8192,
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
         responseMimeType: "application/json",
         ...(thinkingConfig ? { thinkingConfig } : {})
       }
@@ -534,10 +537,36 @@
   }
 
   /**
-   * Diagnostic snapshot for a failed or successful attempt: finish/block
-   * reason, truncated raw text (RAW_LOG_LIMIT), safetyRatings, usageMetadata.
-   * Does not throw; candidateText failures become empty rawOutput.
+   * Diagnostic snapshot for a failed or successful attempt. Raw model output
+   * is intentionally excluded; only bounded, non-content metadata is kept.
    */
+  function safeDiagnosticEnum(value) {
+    const text = shared.cleanText(value).slice(0, 100);
+    const allowed = new Set([
+      "BLOCKLIST",
+      "HIGH",
+      "IMAGE_PROHIBITED_CONTENT",
+      "IMAGE_SAFETY",
+      "LANGUAGE",
+      "LOW",
+      "MALFORMED_FUNCTION_CALL",
+      "MAX_TOKENS",
+      "MEDIUM",
+      "MISSING_THOUGHT_SIGNATURE",
+      "NEGLIGIBLE",
+      "NO_IMAGE",
+      "OTHER",
+      "PROHIBITED_CONTENT",
+      "RECITATION",
+      "SAFETY",
+      "SPII",
+      "STOP",
+      "TOO_MANY_TOOL_CALLS",
+      "UNEXPECTED_TOOL_CALL"
+    ]);
+    return allowed.has(text) || /^HARM_CATEGORY_[A-Z0-9_]+$/.test(text) ? text : "";
+  }
+
   function responseDiagnostic(response, raw = "") {
     const candidate = response?.candidates?.[0] ?? {};
     let output = raw;
@@ -549,12 +578,67 @@
       }
     }
     return {
-      blockReason: response?.promptFeedback?.blockReason || "",
-      finishReason: candidate.finishReason || "",
-      rawOutput: String(output ?? "").slice(0, RAW_LOG_LIMIT),
-      safetyRatings: Array.isArray(candidate.safetyRatings) ? candidate.safetyRatings : [],
-      usageMetadata: response?.usageMetadata ?? null
+      blockReason: safeDiagnosticEnum(response?.promptFeedback?.blockReason),
+      finishReason: safeDiagnosticEnum(candidate.finishReason),
+      outputCharacterCount: String(output ?? "").length,
+      safetyRatings: (Array.isArray(candidate.safetyRatings) ? candidate.safetyRatings : [])
+        .slice(0, 20)
+        .map(rating => ({
+          blocked: Boolean(rating?.blocked),
+          category: safeDiagnosticEnum(rating?.category),
+          probability: safeDiagnosticEnum(rating?.probability),
+          probabilityScore: Number.isFinite(Number(rating?.probabilityScore))
+            ? Number(rating.probabilityScore) : null,
+          severity: safeDiagnosticEnum(rating?.severity),
+          severityScore: Number.isFinite(Number(rating?.severityScore))
+            ? Number(rating.severityScore) : null
+        })),
+      usageMetadata: sanitizeUsageMetadata(response?.usageMetadata)
     };
+  }
+
+  function sanitizeUsageMetadata(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const result = {};
+    for (const key of [
+      "cachedContentTokenCount",
+      "candidatesTokenCount",
+      "promptTokenCount",
+      "thoughtsTokenCount",
+      "totalTokenCount",
+      "toolUsePromptTokenCount",
+      "trafficType"
+    ]) {
+      if (typeof value[key] === "number" && Number.isFinite(value[key])) result[key] = value[key];
+      else if (key === "trafficType" && typeof value[key] === "string") {
+        const trafficType = shared.cleanText(value[key]).slice(0, 50);
+        if (["ON_DEMAND", "PROVISIONED_THROUGHPUT"].includes(trafficType)) result[key] = trafficType;
+      }
+    }
+    return Object.keys(result).length ? result : null;
+  }
+
+  function sanitizeDiagnostic(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const result = {
+      attempts: (Array.isArray(value.attempts) ? value.attempts : []).slice(0, 4).map(entry => ({
+        attempt: Number.isFinite(Number(entry?.attempt)) ? Number(entry.attempt) : null,
+        blockReason: safeDiagnosticEnum(entry?.blockReason),
+        finishReason: safeDiagnosticEnum(entry?.finishReason),
+        outputCharacterCount: Number.isFinite(Number(entry?.outputCharacterCount))
+          ? Number(entry.outputCharacterCount)
+          : typeof entry?.rawOutput === "string" ? entry.rawOutput.length : 0,
+        safetyRatings: responseDiagnostic({ candidates: [{ safetyRatings: entry?.safetyRatings }] }).safetyRatings,
+        usageMetadata: sanitizeUsageMetadata(entry?.usageMetadata)
+      })),
+      chunk: Number.isFinite(Number(value.chunk)) ? Number(value.chunk) : null,
+      model: shared.cleanText(value.model).slice(0, 200),
+      provider: ["gemini", "vertex"].includes(value.provider) ? value.provider : "",
+      validationErrorCount: Number.isFinite(Number(value.validationErrorCount))
+        ? Number(value.validationErrorCount)
+        : Array.isArray(value.validationErrors) ? value.validationErrors.length : 0
+    };
+    return result;
   }
 
   function cleanStringArray(value) {
@@ -809,6 +893,7 @@
     CHUNK_TEXT_LIMIT,
     DEFAULT_MODEL,
     DIRECT_TEXT_LIMIT,
+    MAX_OUTPUT_TOKENS,
     buildAnalysisRequest,
     buildChunkRepairRequest,
     buildChunkRequest,
@@ -825,6 +910,7 @@
     normalizeTopicOrganizerShape,
     parseJsonCandidate,
     responseDiagnostic,
+    sanitizeDiagnostic,
     thinkingConfigForModel,
     usableModels,
     validateAnalysis,
