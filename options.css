@@ -248,6 +248,14 @@ input:focus, select:focus, textarea:focus { border-color: var(--green); box-shad
   font-size: 13px;
 }
 
+.privacy-notice {
+  margin: -10px 0 18px;
+  border-color: #b9d7c5;
+  background: var(--green-soft);
+  color: var(--green-dark);
+}
+.privacy-notice a { color: inherit; font-weight: 800; }
+
 .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .field-grid span {
   display: flex;

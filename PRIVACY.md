@@ -1,12 +1,16 @@
 # Privacy and data flow
 
-Last updated: September 1, 2026
+Last updated: September 20, 2026
 
 Developed and maintained by Penny Hsieh.
 
-This extension is currently distributed through GitHub and has not been published on the Chrome Web Store.
+This policy applies to versions distributed through the Chrome Web Store or this project's GitHub repository.
 
 Traditional Chinese (Taiwan): [`PRIVACY.zh-TW.md`](PRIVACY.zh-TW.md)
+
+## Chrome Web Store user-data commitment
+
+The use of information received from Google APIs will adhere to the [Chrome Web Store User Data Policy](https://developer.chrome.com/docs/webstore/program-policies/user-data-faq), including the Limited Use requirements. User data read, stored, or transmitted by the extension is used only to provide the Notion article analysis, topic organization, result write-back, and user-initiated queue features described below. It is not used for personalized advertising or credit assessment, is not sold, and is not transferred to third parties unrelated to these features.
 
 ## Data this extension reads
 
@@ -52,6 +56,8 @@ Chrome extension storage holds:
 - Topic dictionary and organizer session: standard topics, definitions, aliases, colors, enabled flags, permanently discarded provisional topic names, the current suggestion batch, unclassified / temporarily skipped items, and the last apply snapshot used for rollback. Dictionary export does not include keys, tokens, or article text.
 - Failure diagnostics: only on AI output failure, provider, model name, stop reason, numeric token usage, safety categories, output character count, and validation error count. The diagnostic field does not persist raw AI responses or validation-error text; a separate short user-facing failure message is retained for retry and troubleshooting.
 - Keys: the Notion token and the two AI keys each have a separate “remember” option. They are kept in session storage by default; they are stored in local extension storage only if you explicitly choose to remember them.
+
+This local data is not synced to an account or server operated by the developer, and the developer cannot access it.
 
 Successful recent rows store page ID, title, URL, status, and time. Failed rows add the limited diagnostic above. The copied support log omits page ID, title, URL, error text, article text, and raw AI output. 「清除清單」 clears detailed recent responses but keeps page IDs and short errors needed to retry. Pending-page scans are capped at 2,000 pages, failed-page loads at 40 pages, stored page titles at 500 characters, and persisted run state at 4 MiB. The options page can clear Notion and all AI keys. Uninstalling the extension removes its Chrome storage.
 
