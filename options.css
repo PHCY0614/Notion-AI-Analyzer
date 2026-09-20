@@ -1,7 +1,7 @@
 :root {
   color-scheme: light;
   --ink: #17211b;
-  --muted: #68736c;
+  --muted: #626d66;
   --paper: #fbfaf6;
   --panel: #ffffff;
   --line: #dce3dc;
@@ -234,6 +234,39 @@ input:focus, select:focus, textarea:focus { border-color: var(--green); box-shad
 .hint { margin-top: 7px; color: var(--muted); font-size: 13px; }
 .hint a { margin-left: 6px; color: var(--green-dark); font-weight: 700; }
 
+.notion-setup-guide {
+  display: grid;
+  gap: 6px;
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px solid #d8e3db;
+  border-radius: 12px;
+  background: #f7faf8;
+  font-size: 14px;
+}
+.notion-setup-guide ol { margin: 0; padding-left: 22px; color: var(--muted); line-height: 1.75; }
+.notion-setup-guide a,
+.notion-picker-actions a { color: var(--green-dark); font-weight: 700; }
+.notion-setup-guide code { font: inherit; color: var(--ink); }
+.notion-picker-actions { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin-top: 16px; }
+.notion-source-status { display: none; margin-top: 12px; padding: 12px 14px; border-radius: 10px; font-size: 14px; }
+.notion-source-status.visible { display: block; }
+.notion-source-status.success { background: var(--green-soft); color: var(--green-dark); }
+.notion-source-status.error { background: #fff0ef; color: var(--red); }
+.notion-source-status.info { background: #eef3f7; color: #385168; }
+.database-change-warning {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid #ead69a;
+  border-radius: 10px;
+  background: #fff9e8;
+  color: #6c5410;
+  font-size: 14px;
+}
+.notion-advanced { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.notion-advanced > summary { color: var(--green-dark); font-size: 14px; font-weight: 750; cursor: pointer; }
+.notion-advanced[open] > summary { margin-bottom: 2px; }
+
 .model-row { display: flex; align-items: end; gap: 12px; }
 .grow { flex: 1; }
 .notice {
@@ -282,8 +315,10 @@ input:focus, select:focus, textarea:focus { border-color: var(--green); box-shad
 .button.primary { background: var(--green); color: white; }
 .button.primary:hover { background: var(--green-dark); }
 .button.secondary { border-color: #b9c6bd; background: white; color: var(--ink); }
+.button.secondary:hover { background: #f3f6f3; }
 .button.danger { border-color: #e1b6b2; background: #fff8f7; color: var(--red); }
 .button.compact { min-height: 44px; white-space: nowrap; }
+.button:focus-visible { outline: 3px solid rgba(23, 107, 69, .22); outline-offset: 2px; }
 
 details.panel > summary { cursor: pointer; font-size: 19px; margin-bottom: 14px; }
 .spec-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 12px 0; }
@@ -433,14 +468,50 @@ details.panel > summary { cursor: pointer; font-size: 19px; margin-bottom: 14px;
 .status.error { background: #fff0ef; color: var(--red); }
 .status.info { background: #eef3f7; color: #385168; }
 
+.confirm-dialog {
+  width: min(500px, calc(100% - 32px));
+  max-width: none;
+  padding: 0;
+  border: 0;
+  border-radius: 16px;
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: 0 22px 70px rgba(15, 35, 23, .24);
+}
+.confirm-dialog::backdrop { background: rgba(18, 28, 22, .48); }
+.confirm-dialog__surface { display: grid; gap: 0; }
+.confirm-dialog__body { padding: 26px 26px 20px; }
+.confirm-dialog__body h2 { margin-bottom: 12px; }
+.confirm-dialog__body p { overflow-wrap: anywhere; }
+.confirm-dialog__scope {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--green-soft);
+  color: var(--green-dark);
+  font-size: 14px;
+}
+.confirm-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 26px 22px;
+  border-top: 1px solid var(--line);
+}
+
 @media (max-width: 620px) {
   .shell { width: min(100% - 22px, 820px); margin-top: 28px; }
   .panel { padding: 20px; }
   .model-row { display: block; }
   .model-row .button { margin-top: 10px; width: 100%; }
+  .notion-picker-actions { align-items: stretch; flex-direction: column; }
+  .notion-picker-actions .button { width: 100%; }
   .field-grid { grid-template-columns: 1fr; }
   .spec-grid { grid-template-columns: 1fr 1fr; }
   .actions .button { width: 100%; }
+  .confirm-dialog__body { padding: 22px 20px 18px; }
+  .confirm-dialog__actions { flex-direction: column; padding: 14px 20px 20px; }
+  .confirm-dialog__actions .button { width: 100%; }
   .topic-group-head { grid-template-columns: 18px minmax(0, 1fr); }
   .topic-group-head .confidence { grid-column: 2; justify-self: start; }
   .dictionary-actions { flex-direction: column; }

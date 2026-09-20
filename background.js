@@ -24,6 +24,7 @@ const MAX_ARTICLE_CHARACTERS = 120000;
 const MAX_INPUT_TOKENS = 350000;
 const TOKEN_PREFLIGHT_CHARACTERS = 80000;
 const MAX_PENDING_PAGES = 2000;
+const MAX_NOTION_DATA_SOURCES = 300;
 const MAX_PERSISTED_STATE_BYTES = 4 * 1024 * 1024;
 const CURRENT_PROMPT_VERSION = "2026-08-26-1";
 const TOPIC_ORGANIZER_CACHE_VERSION = 10;
@@ -616,6 +617,92 @@ async function notionRequest(path, options = {}) {
   throw new AppError("Notion API 重試次數已用完", { code: "NOTION_RETRY_EXHAUSTED" });
 }
 
+function safeNotionDataSourceListError(error) {
+  if (error?.code === "NOTION_NETWORK") {
+    return new AppError("無法連線到 Notion，請檢查網路後重新整理", { code: "NOTION_NETWORK" });
+  }
+  if (error?.status === 401) {
+    return new AppError("Notion Token 無效，請重新輸入後再試", {
+      code: "NOTION_AUTH",
+      status: 401
+    });
+  }
+  if (error?.status === 403) {
+    return new AppError("這個 Integration 權限不足，或受到 Notion 工作區限制", {
+      code: "NOTION_AUTH",
+      status: 403
+    });
+  }
+  if (error?.status === 429 || error?.code === "NOTION_RATE_LIMIT") {
+    return new AppError("Notion 請求過於頻繁，請稍後再重新整理", {
+      code: "NOTION_RATE_LIMIT",
+      retryAfter: error?.retryAfter || 0,
+      status: 429
+    });
+  }
+  if (error?.status === 529 || (error?.status >= 500 && error?.status < 600)) {
+    return new AppError("Notion 服務暫時無法使用，請稍後再重新整理", {
+      code: "NOTION_API",
+      status: error.status
+    });
+  }
+  return new AppError("無法載入 Notion 資料庫，請稍後再試", {
+    code: error?.code === "NOTION_RETRY_EXHAUSTED" ? "NOTION_RETRY_EXHAUSTED" : "NOTION_API",
+    status: error?.status || 0
+  });
+}
+
+async function listNotionDataSources(suppliedToken = "") {
+  const oneTimeToken = String(suppliedToken ?? "").trim();
+  const token = oneTimeToken || await readSecret(NOTION_TOKEN_KEY);
+  if (!token) {
+    throw new AppError("請先輸入 Notion Integration Token", { code: "NOTION_TOKEN_MISSING" });
+  }
+
+  const byId = new Map();
+  const seenCursors = new Set();
+  let cursor = "";
+  let scannedCount = 0;
+  let limitReached = false;
+
+  try {
+    while (scannedCount < MAX_NOTION_DATA_SOURCES) {
+      const response = await notionRequest("/v1/search", {
+        method: "POST",
+        body: N.dataSourceSearchPayload(cursor),
+        token
+      });
+      const remaining = MAX_NOTION_DATA_SOURCES - scannedCount;
+      const results = Array.isArray(response.results) ? response.results.slice(0, remaining) : [];
+      scannedCount += results.length;
+      for (const result of results) {
+        const summary = N.dataSourceSummary(result);
+        if (summary && !byId.has(compactNotionId(summary.id))) {
+          byId.set(compactNotionId(summary.id), summary);
+        }
+      }
+
+      if (scannedCount >= MAX_NOTION_DATA_SOURCES) {
+        limitReached = Boolean(response.has_more);
+        break;
+      }
+      const nextCursor = typeof response.next_cursor === "string" ? response.next_cursor : "";
+      if (!response.has_more || !nextCursor || seenCursors.has(nextCursor)) break;
+      seenCursors.add(nextCursor);
+      cursor = nextCursor;
+    }
+  } catch (error) {
+    throw safeNotionDataSourceListError(error);
+  }
+
+  const collator = new Intl.Collator("zh-Hant-TW", { numeric: true, sensitivity: "base" });
+  const dataSources = [...byId.values()].sort((left, right) => {
+    const byTitle = collator.compare(left.title, right.title);
+    return byTitle || left.id.localeCompare(right.id);
+  });
+  return { dataSources, limitReached };
+}
+
 // ==== AI transport ====
 async function googleGenerativeRequest(model, payload, options, descriptor) {
   const apiKey = options.apiKey || await descriptor.requireKey();
@@ -1011,6 +1098,61 @@ async function ensureSchema(config, token) {
   };
   await writeConfig(nextConfig);
   return { config: nextConfig, dataSource, plan };
+}
+
+/**
+ * Explicit, user-approved preparation for 整理狀態. Resolves the configured
+ * data source, then PATCHes only that property according to
+ * statusFieldSetupPlan. Existing Select options are preserved; a same-name
+ * non-Select field is rejected. This action does not create other analysis
+ * properties or write article pages.
+ */
+async function prepareNotionStatusField() {
+  const token = await requireNotionToken();
+  const config = await readConfig();
+  let resolved;
+  if (config.dataSourceId) {
+    try {
+      const dataSource = await notionRequest(`/v1/data_sources/${config.dataSourceId}`, { token });
+      resolved = { dataSource, dataSourceId: dataSource.id, databaseId: config.databaseId };
+    } catch (error) {
+      if (error.status !== 404) throw error;
+    }
+  }
+  if (!resolved) resolved = await resolveDataSource(config, token);
+
+  const plan = N.statusFieldSetupPlan(resolved.dataSource.properties ?? {});
+  if (plan.errors.length) {
+    throw new AppError(plan.setupIssue?.message || plan.errors.join("；"), {
+      code: plan.setupIssue?.code || "NOTION_STATUS_FIELD_INVALID"
+    });
+  }
+  if (plan.changed) {
+    await notionRequest(`/v1/data_sources/${resolved.dataSourceId}`, {
+      method: "PATCH",
+      body: { properties: plan.properties },
+      token
+    });
+  }
+
+  const nextConfig = {
+    ...config,
+    dataSourceId: resolved.dataSourceId,
+    databaseId: resolved.databaseId || config.databaseId
+  };
+  await writeConfig(nextConfig);
+  preparedDataSourceId = compactNotionId(resolved.dataSourceId);
+  if (["NOTION_STATUS_FIELD_MISSING", "NOTION_PENDING_OPTION_MISSING"].includes(stateCache.databaseCheck?.code)) {
+    stateCache.databaseCheck = null;
+    stateCache.lastError = "";
+    await persistState();
+  }
+  return {
+    addedOptions: plan.addedOptions,
+    changed: plan.changed,
+    created: plan.created,
+    dataSourceId: resolved.dataSourceId
+  };
 }
 
 /**
@@ -2797,6 +2939,14 @@ function resolvePromptSettings(settings, current) {
   return { analysisPrompt, analysisPromptCustomized, outputSpec, requestTimeoutMinutes };
 }
 
+function notionTargetChanged(current, nextTargetId) {
+  const currentTargetIds = [current.notionTarget, current.dataSourceId]
+    .map(value => compactNotionId(S.extractNotionId(value)))
+    .filter(Boolean);
+  if (!nextTargetId) return currentTargetIds.length > 0;
+  return !currentTargetIds.includes(nextTargetId);
+}
+
 function resolveTopicPreferences(settings, current, targetChanged, nextTargetId) {
   const preferExistingTopicsByDataSource = normalizeTopicOrganizerPreferences(
     current.preferExistingTopicsByDataSource
@@ -2919,8 +3069,8 @@ function buildSaveResponse(next, resolved) {
  * Persists options-page settings. Guard order: parse notionTarget, provider
  * and model (MODEL_INVALID), prompt
  * and timeout, then assertDatabaseChangeAllowed. All of those must pass
- * before storeSecret or writeConfig. A compact-UUID change versus the current
- * notionTarget or dataSourceId is a database change: the next config clears
+ * before storeSecret or writeConfig. A compact-UUID change versus both the
+ * current notionTarget and dataSourceId is a database change: the next config clears
  * dataSourceId, databaseId, topicAliases, topicPageResolutions,
  * discardedTopicNames, and topicDictionary so another database cannot reuse
  * that taxonomy or queue; then resetStateForDatabaseChange. Topic
@@ -2933,9 +3083,8 @@ async function saveSettings(settings) {
   const notionTarget = resolveNotionTarget(settings, current);
   const provider = resolveProviderSelection(settings, current);
   const promptSettings = resolvePromptSettings(settings, current);
-  const currentTargetId = compactNotionId(S.extractNotionId(current.notionTarget || current.dataSourceId));
   const nextTargetId = compactNotionId(S.extractNotionId(notionTarget));
-  const targetChanged = nextTargetId !== currentTargetId;
+  const targetChanged = notionTargetChanged(current, nextTargetId);
   const { preferExistingTopics, preferExistingTopicsByDataSource } = resolveTopicPreferences(
     settings,
     current,
@@ -3480,10 +3629,14 @@ async function handleMessage(message) {
       return {
         prompt: P.buildSystemPrompt(message.customized ? message.prompt : "", message.outputSpec)
       };
+    case "LIST_NOTION_DATA_SOURCES":
+      return listNotionDataSources(message.notionToken);
     case "SAVE_SETTINGS":
       return saveSettings(message.settings ?? {});
     case "TEST_CONNECTIONS":
       return testConnections();
+    case "PREPARE_NOTION_STATUS_FIELD":
+      return prepareNotionStatusField();
     case "LIST_MODELS": {
       const config = await readConfig();
       const provider = normalizeAiProvider(config.aiProvider);

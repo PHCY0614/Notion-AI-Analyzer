@@ -54,10 +54,11 @@ This extension is not currently available on the Chrome Web Store and must be in
 4. Enable **Developer mode** in the upper-right corner.
 5. Click **Load unpacked**.
 6. Select the extracted folder that contains `manifest.json`.
-7. Open the extension settings and enter your Notion Integration Token, Notion database URL or Data Source ID, and the API key for your selected AI provider.
-8. Click `測試連線並準備欄位` (“Test connections and prepare properties”) to complete the connection and database property setup.
+7. Create a Notion Internal Integration, then use `Add connections` in the target database to share it with that Integration.
+8. Open the extension settings, paste the Notion Integration Token, click `載入可用資料庫` (“Load available databases”), choose one active data source from the authorized list, and enter the API key for your selected AI provider.
+9. Save the settings, then click `測試連線並準備欄位` (“Test connections and prepare properties”) to complete the connection and database property setup. If the database lacks the `整理狀態` Select property or the `待分析` option, the extension asks for confirmation first. It creates the property or completes the workflow options only after you choose `新增並繼續` (“Add and continue”).
 
-Before using the extension, make sure your Notion integration has been granted access to the target database.
+The list contains only data sources shared with that Integration, and only one database can be active at a time. If Notion Search has not indexed a database yet, the list exceeds the load limit, or the target is otherwise absent, expand the advanced settings and enter a database URL or Data Source ID manually.
 
 Versions installed manually from GitHub do not update automatically. After downloading a new version and replacing the existing files, return to `chrome://extensions` and click **Reload** on the extension card.
 

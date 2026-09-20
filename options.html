@@ -29,6 +29,15 @@
           </div>
         </div>
 
+        <div class="notion-setup-guide">
+          <strong>三步驟完成 Notion 連線</strong>
+          <ol>
+            <li><a href="https://developers.notion.com/guides/get-started/quick-start" target="_blank" rel="noreferrer">建立 Notion Internal Integration／API Token</a>。</li>
+            <li>在 Notion 資料庫的 <code>Add connections</code> 中加入這個 Integration。</li>
+            <li>貼上 Token，按「載入可用資料庫」，再選擇要使用的資料庫。</li>
+          </ol>
+        </div>
+
         <label for="notion-token">Notion Integration Token</label>
         <input id="notion-token" name="notionToken" type="password" autocomplete="off" spellcheck="false" placeholder="secret_…（留白會保留目前設定）">
         <label class="check-row">
@@ -37,9 +46,26 @@
         </label>
         <p class="hint">未勾選時只保留到瀏覽器完全關閉。勾選後會存於 Chrome 擴充功能的本機儲存空間，不是加密保險箱。</p>
 
-        <label for="notion-target">Notion 資料庫網址或 Data Source ID</label>
-        <input id="notion-target" name="notionTarget" type="text" autocomplete="off" spellcheck="false" placeholder="貼上資料庫網址，或擷取工具顯示的 Data Source ID" required>
-        <p class="hint">欄位在 Notion 裡的排列順序不影響工具。若資料庫有多個 Data Source，請填入精確 ID。</p>
+        <div class="notion-picker-actions">
+          <button id="load-notion-data-sources" class="button secondary" type="button">載入可用資料庫</button>
+          <a href="https://www.notion.com/help/add-and-manage-connections-with-the-api" target="_blank" rel="noreferrer">查看 Notion 分享指引</a>
+        </div>
+        <div id="notion-data-source-status" class="notion-source-status" role="status" aria-live="polite"></div>
+        <div id="notion-data-source-picker" hidden>
+          <label for="notion-data-source">作用中的 Notion 資料庫</label>
+          <select id="notion-data-source">
+            <option value="" disabled>請選擇資料庫</option>
+          </select>
+          <p class="hint">每個選項代表一個 Data Source。選擇後仍需按「儲存設定」，不會自動測試連線或修改 Notion 欄位。</p>
+        </div>
+        <p id="database-change-warning" class="database-change-warning" role="note" hidden>儲存後將切換作用中的資料庫，並清除目前資料庫的本機執行清單、近期結果與主題整理狀態；Notion 中既有內容不會被刪除。</p>
+
+        <details class="notion-advanced">
+          <summary>進階設定：手動輸入資料庫網址或 ID</summary>
+          <label for="notion-target">Notion 資料庫網址或 Data Source ID</label>
+          <input id="notion-target" name="notionTarget" type="text" autocomplete="off" spellcheck="false" placeholder="貼上資料庫網址，或擷取工具顯示的 Data Source ID" required>
+          <p class="hint">若 Search 索引尚未更新、資料庫未出現在清單或超過載入上限，可繼續手動輸入。若資料庫有多個 Data Source，請填入精確 ID。</p>
+        </details>
       </section>
 
       <section class="panel" aria-labelledby="gemini-heading">
@@ -256,6 +282,19 @@
       </div>
     </form>
   </main>
+  <dialog id="notion-status-dialog" class="confirm-dialog" aria-labelledby="notion-status-dialog-title" aria-describedby="notion-status-dialog-message notion-status-dialog-scope">
+    <form method="dialog" class="confirm-dialog__surface">
+      <div class="confirm-dialog__body">
+        <h2 id="notion-status-dialog-title">準備 Notion 整理狀態</h2>
+        <p id="notion-status-dialog-message"></p>
+        <p id="notion-status-dialog-scope" class="confirm-dialog__scope">只會新增或補齊「整理狀態」這個 Select 欄位及分析流程需要的狀態選項；既有欄位、既有選項與文章內容都會保留。</p>
+      </div>
+      <div class="confirm-dialog__actions">
+        <button id="notion-status-cancel" class="button primary" type="submit" value="cancel" autofocus>暫不新增</button>
+        <button class="button secondary" type="submit" value="confirm">新增並繼續</button>
+      </div>
+    </form>
+  </dialog>
   <script src="ui-select.js"></script>
   <script src="options.js"></script>
 </body>

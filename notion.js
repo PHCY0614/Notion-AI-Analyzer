@@ -394,6 +394,83 @@
     return payload;
   }
 
+  /**
+   * Builds the one-field PATCH plan used only after the user explicitly
+   * approves preparing 整理狀態. A missing field is created as Select with all
+   * workflow options. An existing Select keeps every option by id (or name)
+   * and receives only missing workflow options. A same-name non-Select field
+   * is never converted.
+   */
+  function statusFieldSetupPlan(existingProperties = {}) {
+    const name = PROPERTY_NAMES.processingStatus;
+    const existing = existingProperties[name];
+    if (existing && propertyType(existing) !== "select") {
+      const setupIssue = {
+        code: "NOTION_STATUS_FIELD_TYPE",
+        message: DATABASE_SETUP_MESSAGES.statusFieldType
+      };
+      return {
+        addedOptions: [],
+        changed: false,
+        created: false,
+        errors: [setupIssue.message],
+        properties: {},
+        setupIssue
+      };
+    }
+
+    const existingOptions = Array.isArray(existing?.select?.options)
+      ? existing.select.options.filter(option => option?.name)
+      : [];
+    const existingNames = new Set(existingOptions.map(option => option.name));
+    const missing = STATUS_OPTIONS.filter(option => !existingNames.has(option.name));
+    if (existing && !missing.length) {
+      return {
+        addedOptions: [],
+        changed: false,
+        created: false,
+        errors: [],
+        properties: {},
+        setupIssue: null
+      };
+    }
+
+    return {
+      addedOptions: missing.map(option => option.name),
+      changed: true,
+      created: !existing,
+      errors: [],
+      properties: {
+        [name]: {
+          select: {
+            options: existing
+              ? [
+                  ...existingOptions.map(option => option.id
+                    ? { id: option.id }
+                    : { name: option.name }),
+                  ...missing.map(option => ({ ...option }))
+                ]
+              : STATUS_OPTIONS.map(option => ({ ...option }))
+          }
+        }
+      },
+      setupIssue: null
+    };
+  }
+
+  function dataSourceSearchPayload(startCursor = "") {
+    const payload = {
+      page_size: 100,
+      filter: {
+        property: "object",
+        value: "data_source",
+        in_trash: false
+      }
+    };
+    if (startCursor) payload.start_cursor = startCursor;
+    return payload;
+  }
+
   function topicOrganizerQueryPayload(startCursor = "", pageSize = 50) {
     if (typeof startCursor === "number") {
       pageSize = startCursor;
@@ -425,6 +502,25 @@
       if (typeof item?.equation?.expression === "string") return item.equation.expression;
       return "";
     }).join("");
+  }
+
+  /**
+   * Reduces one Search API data_source result to the fields used by the
+   * options-page picker. Invalid, trashed, or parentless objects are omitted;
+   * external icon URLs, schema, descriptions, and user data are never copied.
+   */
+  function dataSourceSummary(dataSource) {
+    if (!dataSource || typeof dataSource !== "object") return null;
+    if (dataSource.object !== "data_source" || dataSource.in_trash === true) return null;
+    const id = shared.extractNotionId(dataSource.id);
+    const databaseId = shared.extractNotionId(dataSource.parent?.database_id);
+    if (!id || !databaseId) return null;
+    const titleItems = Array.isArray(dataSource.title) ? dataSource.title : [];
+    const title = shared.cleanText(richTextPlain(titleItems)).slice(0, 200) || "未命名資料庫";
+    const emoji = dataSource.icon?.type === "emoji" && typeof dataSource.icon.emoji === "string"
+      ? dataSource.icon.emoji.slice(0, 16)
+      : "";
+    return { id, databaseId, title, emoji };
   }
 
   /**
@@ -524,6 +620,8 @@
     STATUS,
     STATUS_OPTIONS,
     DATABASE_SETUP_MESSAGES,
+    dataSourceSearchPayload,
+    dataSourceSummary,
     analysisPropertySchema,
     analysisDraftPayload,
     allPagesQueryPayload,
@@ -537,6 +635,7 @@
     richText,
     richTextPlain,
     schemaPlan,
+    statusFieldSetupPlan,
     statusUpdatePayload,
     topicKey,
     topicMultiSelect,

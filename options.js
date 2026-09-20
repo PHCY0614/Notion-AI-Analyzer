@@ -5,6 +5,11 @@ const form = document.querySelector("#settings-form");
 const statusBox = document.querySelector("#status");
 const notionToken = document.querySelector("#notion-token");
 const notionTarget = document.querySelector("#notion-target");
+const notionDataSourceSelect = document.querySelector("#notion-data-source");
+const notionDataSourcePicker = document.querySelector("#notion-data-source-picker");
+const notionDataSourceStatus = document.querySelector("#notion-data-source-status");
+const loadNotionDataSourcesButton = document.querySelector("#load-notion-data-sources");
+const databaseChangeWarning = document.querySelector("#database-change-warning");
 const rememberNotionToken = document.querySelector("#remember-notion-token");
 const aiProvider = document.querySelector("#ai-provider");
 const geminiKey = document.querySelector("#gemini-key");
@@ -52,12 +57,19 @@ const importModeDisplay = document.querySelector("#import-mode-display");
 const importModeMenu = document.querySelector("#import-mode-menu");
 const importModeToggle = document.querySelector("#import-mode-toggle");
 const importSplitButton = document.querySelector("#import-split-btn");
+const notionStatusDialog = document.querySelector("#notion-status-dialog");
+const notionStatusDialogMessage = document.querySelector("#notion-status-dialog-message");
+const notionStatusCancel = document.querySelector("#notion-status-cancel");
 const enhancedSelects = new Map();
 let defaultAnalysisPrompt = "";
 let promptCustomized = false;
 let organizerData = null;
 let manualCandidateName = "";
 let topicOrganizerPreferences = {};
+let savedNotionTarget = "";
+let savedDataSourceId = "";
+let notionDataSourcesLoaded = false;
+let notionDataSourcesLoading = false;
 const NO_PENDING_MESSAGE = "目前沒有待分析文章。請先在 Notion 將要處理文章的「整理狀態」設為「待分析」。";
 
 // ==== Shared custom select ====
@@ -68,7 +80,8 @@ function closeEnhancedSelects(except = null) {
 }
 
 /**
- * Options wrapper around AnalyzerSelect. Five ids get custom-select--regular;
+ * Options wrapper around AnalyzerSelect. Model, timeout, and manual-topic ids
+ * get custom-select--regular;
  * all use matchNativeState, emptyLabel 「請選擇」, and onToggle to close other
  * enhanced menus. Document close/Escape is handled on this page, so
  * attachDocumentListeners is false. Extra native change → sync.
@@ -97,6 +110,7 @@ function syncEnhancedSelects() {
 
 for (const select of [
   aiProvider,
+  notionDataSourceSelect,
   geminiModel,
   vertexModel,
   requestTimeout,
@@ -139,18 +153,50 @@ function normalizeFormOutputSpec(writeBack = false) {
 // ==== Background messaging ====
 /**
  * chrome.runtime.sendMessage wrapper. Throws on ok false. Settings UI uses
- * GET_CONFIG / SAVE_SETTINGS; organizer UI uses GET_TOPIC_ORGANIZER and
- * apply/skip/rollback/manual messages. Does not poll.
+ * GET_CONFIG / SAVE_SETTINGS; the Notion picker uses
+ * LIST_NOTION_DATA_SOURCES; organizer UI uses GET_TOPIC_ORGANIZER and
+ * apply/skip/rollback/manual messages. Does not poll or persist picker data.
  */
 async function send(type, extra = {}) {
   const response = await chrome.runtime.sendMessage({ type, ...extra });
-  if (!response?.ok) throw new Error(response?.error?.message || "操作失敗");
+  if (!response?.ok) {
+    const error = new Error(response?.error?.message || "操作失敗");
+    error.code = response?.error?.code || "UNEXPECTED";
+    throw error;
+  }
   return response.data;
 }
 
 function showStatus(message, kind = "info") {
   statusBox.textContent = message;
   statusBox.className = `status visible ${kind}`;
+}
+
+function confirmNotionStatusPreparation(errorCode) {
+  notionStatusDialogMessage.textContent = errorCode === "NOTION_STATUS_FIELD_MISSING"
+    ? "找不到「整理狀態」欄位。要讓擴充功能自動建立這個欄位嗎？"
+    : "「整理狀態」欄位缺少「待分析」選項。要讓擴充功能自動補齊分析流程需要的狀態選項嗎？";
+  notionStatusDialog.returnValue = "cancel";
+  return new Promise(resolve => {
+    notionStatusDialog.addEventListener("close", () => {
+      resolve(notionStatusDialog.returnValue === "confirm");
+    }, { once: true });
+    notionStatusDialog.showModal();
+    notionStatusCancel.focus();
+  });
+}
+
+async function testConnectionsWithStatusPreparation() {
+  try {
+    return { result: await send("TEST_CONNECTIONS"), statusPreparation: null };
+  } catch (error) {
+    if (!["NOTION_STATUS_FIELD_MISSING", "NOTION_PENDING_OPTION_MISSING"].includes(error.code)) throw error;
+    const approved = await confirmNotionStatusPreparation(error.code);
+    if (!approved) throw error;
+    showStatus("正在準備「整理狀態」，完成後會繼續測試連線…", "info");
+    const statusPreparation = await send("PREPARE_NOTION_STATUS_FIELD");
+    return { result: await send("TEST_CONNECTIONS"), statusPreparation };
+  }
 }
 
 function closeImportModeMenu() {
@@ -226,7 +272,13 @@ function updateProviderUi() {
 }
 
 function setBusy(isBusy) {
-  for (const button of [saveButton, testButton, loadModelsButton, clearButton]) button.disabled = isBusy;
+  for (const button of [
+    saveButton,
+    testButton,
+    loadModelsButton,
+    loadNotionDataSourcesButton,
+    clearButton
+  ]) button.disabled = isBusy;
 }
 
 function formatTokenLimit(value) {
@@ -287,6 +339,83 @@ function renderModels(select, models, selected) {
 }
 
 // ==== Settings form ====
+function shortNotionId(value) {
+  return compactTargetId(value).slice(0, 8);
+}
+
+function savedTargetIds() {
+  return [savedNotionTarget, savedDataSourceId].map(compactTargetId).filter(Boolean);
+}
+
+function updateDatabaseChangeWarning() {
+  const nextId = compactTargetId(notionTarget.value);
+  const currentIds = savedTargetIds();
+  const changed = nextId ? !currentIds.includes(nextId) : currentIds.length > 0;
+  databaseChangeWarning.hidden = !changed;
+}
+
+function showNotionDataSourceStatus(message, kind = "info") {
+  notionDataSourceStatus.textContent = message;
+  notionDataSourceStatus.className = `notion-source-status visible ${kind}`;
+}
+
+function dataSourceOptionLabel(dataSource, duplicateTitles) {
+  const titleKey = dataSource.title.toLocaleLowerCase("zh-Hant-TW");
+  const duplicateSuffix = duplicateTitles.get(titleKey) > 1 ? ` · ${shortNotionId(dataSource.id)}` : "";
+  return `${dataSource.emoji ? `${dataSource.emoji} ` : ""}${dataSource.title}${duplicateSuffix}`;
+}
+
+function renderNotionDataSources(dataSources, limitReached) {
+  const sources = Array.isArray(dataSources) ? dataSources : [];
+  const duplicateTitles = new Map();
+  for (const source of sources) {
+    const key = source.title.toLocaleLowerCase("zh-Hant-TW");
+    duplicateTitles.set(key, (duplicateTitles.get(key) || 0) + 1);
+  }
+
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "請選擇資料庫";
+  placeholder.disabled = true;
+  const options = sources.map(source => {
+    const option = document.createElement("option");
+    option.value = source.id;
+    option.textContent = dataSourceOptionLabel(source, duplicateTitles);
+    return option;
+  });
+  notionDataSourceSelect.replaceChildren(placeholder, ...options);
+
+  const inputTarget = notionTarget.value.trim();
+  const inputId = compactTargetId(inputTarget);
+  const currentIds = [inputId, compactTargetId(savedDataSourceId)].filter(Boolean);
+  const matched = sources.find(source => currentIds.includes(compactTargetId(source.id)));
+  if (matched) {
+    notionDataSourceSelect.value = matched.id;
+  } else if (inputTarget) {
+    const current = document.createElement("option");
+    current.value = inputTarget;
+    current.textContent = inputId && savedTargetIds().includes(inputId)
+      ? "目前設定（未出現在載入結果中）"
+      : "目前輸入（未出現在載入結果中）";
+    notionDataSourceSelect.append(current);
+    notionDataSourceSelect.value = inputTarget;
+  } else {
+    notionDataSourceSelect.value = "";
+  }
+  enhancedSelects.get(notionDataSourceSelect)?.sync();
+
+  notionDataSourcePicker.hidden = !sources.length && !inputTarget;
+  if (sources.length) {
+    const limitNote = limitReached ? " 已達 300 筆上限；其餘資料庫可使用重新整理或進階手動輸入。" : "";
+    showNotionDataSourceStatus(`已載入 ${sources.length} 個可用 Data Source。${limitNote}`, "success");
+  } else {
+    showNotionDataSourceStatus(
+      "Token 可使用，但目前沒有找到已分享給此 Integration 的資料庫。請先在 Notion 將資料庫加入此 Integration，然後重新整理。",
+      "info"
+    );
+  }
+}
+
 /**
  * SAVE_SETTINGS from the form. Local guards for empty target/model and
  * output-spec ranges run first. Secrets are not
@@ -294,7 +423,9 @@ function renderModels(select, models, selected) {
  * TEST_CONNECTIONS or ensureSchema.
  */
 async function saveSettings(showConfirmation = true) {
-  if (!notionTarget.value.trim()) throw new Error("請填入 Notion 資料庫網址或 Data Source ID");
+  if (!notionTarget.value.trim()) {
+    throw new Error("請先選擇 Notion 資料庫，或在進階設定輸入資料庫網址或 Data Source ID");
+  }
   if (!activeModelElement().value.trim()) throw new Error("請選擇分析模型");
   const outputSpec = normalizeFormOutputSpec(true);
   updateOutputSpecSummary();
@@ -303,6 +434,9 @@ async function saveSettings(showConfirmation = true) {
   const config = await send("SAVE_SETTINGS", { settings: settingsFromForm() });
   topicOrganizerPreferences = config.preferExistingTopicsByDataSource ?? topicOrganizerPreferences;
   preferExistingTopics.checked = Boolean(config.preferExistingTopics);
+  savedNotionTarget = config.notionTarget || "";
+  savedDataSourceId = config.dataSourceId || "";
+  updateDatabaseChangeWarning();
   notionToken.value = "";
   geminiKey.value = "";
   vertexKey.value = "";
@@ -326,6 +460,8 @@ async function loadConfig() {
   try {
     const config = await send("GET_CONFIG");
     aiProvider.value = config.aiProvider || "gemini";
+    savedNotionTarget = config.notionTarget || "";
+    savedDataSourceId = config.dataSourceId || "";
     notionTarget.value = config.notionTarget || config.dataSourceId || "";
     const selectedModel = config.geminiModel || "gemini-3.5-flash-lite";
     ensureModelOption(geminiModel, selectedModel);
@@ -361,6 +497,7 @@ async function loadConfig() {
     vertexKey.placeholder = config.hasVertexKey ? "已設定（留白會保留）" : "AIza…";
     updateProviderUi();
     syncEnhancedSelects();
+    updateDatabaseChangeWarning();
     if (config.providerReselectionRequired) {
       showStatus("舊版 AI 服務已移除。請選擇 Google AI Studio 或 Vertex AI，填入金鑰後儲存設定。", "info");
     }
@@ -379,6 +516,40 @@ function compactTargetId(value) {
 notionTarget.addEventListener("input", () => {
   const key = compactTargetId(notionTarget.value);
   preferExistingTopics.checked = Boolean(key && topicOrganizerPreferences[key]);
+  const matchingOption = [...notionDataSourceSelect.options]
+    .find(option => compactTargetId(option.value) === key);
+  notionDataSourceSelect.value = matchingOption?.value || "";
+  enhancedSelects.get(notionDataSourceSelect)?.sync();
+  updateDatabaseChangeWarning();
+});
+
+notionDataSourceSelect.addEventListener("change", () => {
+  if (!notionDataSourceSelect.value) return;
+  notionTarget.value = notionDataSourceSelect.value;
+  notionTarget.dispatchEvent(new Event("input", { bubbles: true }));
+});
+
+loadNotionDataSourcesButton.addEventListener("click", async () => {
+  if (notionDataSourcesLoading) return;
+  notionDataSourcesLoading = true;
+  setBusy(true);
+  loadNotionDataSourcesButton.textContent = "載入中…";
+  showNotionDataSourceStatus("正在向 Notion 載入已授權的資料庫…", "info");
+  try {
+    const result = await send("LIST_NOTION_DATA_SOURCES", {
+      notionToken: notionToken.value.trim()
+    });
+    notionDataSourcesLoaded = true;
+    renderNotionDataSources(result.dataSources, result.limitReached);
+  } catch (error) {
+    showNotionDataSourceStatus(error.message, "error");
+  } finally {
+    notionDataSourcesLoading = false;
+    setBusy(false);
+    loadNotionDataSourcesButton.textContent = notionDataSourcesLoaded
+      ? "重新整理資料庫"
+      : "載入可用資料庫";
+  }
 });
 
 form.addEventListener("submit", async event => {
@@ -398,11 +569,16 @@ testButton.addEventListener("click", async () => {
   showStatus("正在儲存、連接 Notion、準備欄位並驗證 AI 服務…", "info");
   try {
     await saveSettings(false);
-    const result = await send("TEST_CONNECTIONS");
+    const { result, statusPreparation } = await testConnectionsWithStatusPreparation();
     const changes = [
+      statusPreparation?.created
+        ? "已建立整理狀態欄位"
+        : statusPreparation?.changed
+          ? "已補齊整理狀態選項"
+          : "",
       result.addedProperties.length ? `新增 ${result.addedProperties.join("、")}` : "欄位已齊全",
       result.updatedProperties.length ? `補上 ${result.updatedProperties.join("、")} 的狀態選項` : "狀態選項已齊全"
-    ].join("；");
+    ].filter(Boolean).join("；");
     const modelNote = result.selectedAvailable
       ? "目前模型可用"
       : "目前模型未出現在清單，請按「掃描所有可用模型」改選";

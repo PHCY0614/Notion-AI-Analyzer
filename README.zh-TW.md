@@ -60,10 +60,11 @@ AI 負責減少重複工作，但不會取代使用者對知識庫分類方式�
 4. 開啟右上角的「開發人員模式」。
 5. 按下「載入未封裝項目」。
 6. 選擇解壓縮後、內含 `manifest.json` 的資料夾。
-7. 開啟擴充功能設定頁，填入 Notion Integration Token、Notion 資料庫網址或 Data Source ID，以及所選 AI 服務商的 API Key。
-8. 按下「測試連線並準備欄位」，完成連線與資料庫欄位設定。
+7. 建立 Notion Internal Integration，並在要使用的資料庫中透過 `Add connections` 將資料庫分享給該 Integration。
+8. 開啟擴充功能設定頁，貼上 Notion Integration Token，按「載入可用資料庫」，從已授權清單中選擇一個作用中資料庫，再填入所選 AI 服務商的 API Key。
+9. 按下「儲存設定」，再按「測試連線並準備欄位」，完成連線與資料庫欄位設定。若資料庫缺少 Select 型別的「整理狀態」欄位或「待分析」選項，擴充功能會先顯示確認視窗；只有在使用者選擇「新增並繼續」後，才會建立欄位或補齊分析流程需要的狀態選項。
 
-使用前，請先確認 Notion Integration 已取得目標資料庫的存取權限。
+清單只會顯示已分享給該 Integration 的 Data Source，而且同一時間只會使用一個作用中資料庫。若 Notion Search 索引尚未更新、資料庫超過載入上限或未出現在清單中，仍可展開進階設定，手動輸入資料庫網址或 Data Source ID。
 
 由 GitHub 手動安裝的版本不會自動更新。下載新版本並替換原本檔案後，請回到 `chrome://extensions`，按下擴充功能卡片上的「重新載入」。
 
