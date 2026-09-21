@@ -10,10 +10,6 @@ async function handleMessage(message) {
       return publicStatus();
     case "GET_CONFIG":
       return getConfigForUi();
-    case "GET_PROMPT_PREVIEW":
-      return {
-        prompt: P.buildSystemPrompt(message.customized ? message.prompt : "", message.outputSpec)
-      };
     case "LIST_NOTION_DATA_SOURCES":
       return listNotionDataSources(message.notionToken);
     case "SAVE_SETTINGS":
@@ -30,7 +26,8 @@ async function handleMessage(message) {
       else models = await listGeminiModels();
       return {
         models,
-        provider
+        provider,
+        recommended: G.recommendedModelName(models)
       };
     }
     case "SCAN_PENDING":

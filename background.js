@@ -18,7 +18,17 @@ importScripts(
   "background/messages.js"
 );
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (sender?.id !== chrome.runtime.id) {
+    sendResponse({
+      ok: false,
+      error: {
+        code: "UNTRUSTED_SENDER",
+        message: "已忽略來自其他擴充功能的訊息"
+      }
+    });
+    return false;
+  }
   handleMessage(message)
     .then(data => sendResponse({ ok: true, data }))
     .catch(error => sendResponse({

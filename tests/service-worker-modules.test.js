@@ -52,6 +52,8 @@ function testImportMap() {
 
   const entry = source("background.js");
   assert.match(entry, /chrome\.runtime\.onMessage\.addListener/);
+  assert.match(entry, /sender\?\.id !== chrome\.runtime\.id/);
+  assert.match(entry, /UNTRUSTED_SENDER/);
   assert.match(entry, /chrome\.alarms\.onAlarm\.addListener/);
   assert.match(entry, /chrome\.runtime\.onInstalled\.addListener/);
   assert.match(entry, /chrome\.runtime\.onStartup\.addListener/);
@@ -77,10 +79,12 @@ function testCriticalWiring() {
     "APPLY_TOPIC_GROUPS",
     "ROLLBACK_TOPIC_APPLY",
     "RESOLVE_TOPIC_REVIEW",
-    "GET_PROMPT_PREVIEW"
+    "REANALYZE_PAGE",
+    "LIST_MODELS"
   ]) {
     assert.match(messages, new RegExp(`case "${action}"`));
   }
+  assert.doesNotMatch(messages, /GET_PROMPT_PREVIEW/);
 
   const sw = serviceWorkerSource();
   assert.match(sw, /MAX_ARTICLE_CHARACTERS = 120000/);

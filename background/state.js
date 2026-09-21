@@ -392,7 +392,7 @@ async function activeAiContext(config) {
   if (provider === "vertex") {
     return {
       apiKey: await requireVertexKey(),
-      model: S.normalizeModelName(config.vertexModel) || "gemini-3.5-flash-lite",
+      model: S.normalizeModelName(config.vertexModel) || G.DEFAULT_MODEL,
       provider
     };
   }

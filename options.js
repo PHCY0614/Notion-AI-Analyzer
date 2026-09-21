@@ -66,6 +66,7 @@ let savedDataSourceId = "";
 let notionDataSourcesLoaded = false;
 let notionDataSourcesLoading = false;
 const NO_PENDING_MESSAGE = "目前沒有待分析文章。請先在 Notion 將要處理文章的「整理狀態」設為「待分析」。";
+const DEFAULT_MODEL = "gemini-3.5-flash-lite";
 
 // ==== Shared custom select ====
 function closeEnhancedSelects(except = null) {
@@ -279,12 +280,12 @@ function formatTokenLimit(value) {
   return new Intl.NumberFormat("zh-TW", { notation: "compact", maximumFractionDigits: 1 }).format(value);
 }
 
-function modelLabel(model) {
+function modelLabel(model, recommendedName) {
   const limits = [
     Number.isFinite(model.inputTokenLimit) ? `輸入 ${formatTokenLimit(model.inputTokenLimit)}` : "",
     Number.isFinite(model.outputTokenLimit) ? `輸出 ${formatTokenLimit(model.outputTokenLimit)}` : ""
   ].filter(Boolean).join("／");
-  const recommended = model.name === "gemini-3.5-flash-lite" ? "｜建議" : "";
+  const recommended = model.name === recommendedName ? "｜建議" : "";
   const display = model.displayName && model.displayName !== model.name
     ? `${model.displayName}｜${model.name}`
     : model.name;
@@ -307,24 +308,29 @@ function ensureModelOption(select, name, label = name) {
 
 /**
  * Replaces one model <select> from a LIST_MODELS result array and syncs its
- * AnalyzerSelect. Sends no messages. Rebuilds options, then selects the
- * previous value, else gemini-3.5-flash-lite, else
- * the first model. The load-models click handler is what sends LIST_MODELS
- * after SAVE_SETTINGS. Provider tests, schema, and AI calls stay in
- * background.js.
+ * AnalyzerSelect. Sends no messages. Rebuilds options, marks 「建議」 on the
+ * first priority model that actually appears in the live list, then selects
+ * the previous value if still present, else that recommended model, else
+ * the first model. Does not keep a missing stored id as an option.
+ * The load-models click handler is what sends LIST_MODELS after SAVE_SETTINGS.
+ * Provider tests, schema, and AI calls stay in background.js.
  */
-function renderModels(select, models, selected) {
+function renderModels(select, models, selected, recommendedName) {
+  const recommended = recommendedName
+    || models.find(model => model.name === DEFAULT_MODEL)?.name
+    || models[0]?.name
+    || "";
   const options = models.map(model => {
     const option = document.createElement("option");
     option.value = model.name;
-    option.textContent = modelLabel(model);
+    option.textContent = modelLabel(model, recommended);
     return option;
   });
   select.replaceChildren(...options);
   if (models.some(model => model.name === selected)) {
     select.value = selected;
-  } else if (models.some(model => model.name === "gemini-3.5-flash-lite")) {
-    select.value = "gemini-3.5-flash-lite";
+  } else if (models.some(model => model.name === recommended)) {
+    select.value = recommended;
   } else if (models[0]) {
     select.value = models[0].name;
   }
@@ -456,10 +462,10 @@ async function loadConfig() {
     savedNotionTarget = config.notionTarget || "";
     savedDataSourceId = config.dataSourceId || "";
     notionTarget.value = config.notionTarget || config.dataSourceId || "";
-    const selectedModel = config.geminiModel || "gemini-3.5-flash-lite";
+    const selectedModel = config.geminiModel || DEFAULT_MODEL;
     ensureModelOption(geminiModel, selectedModel);
     geminiModel.value = selectedModel;
-    const selectedVertexModel = config.vertexModel || "gemini-3.5-flash-lite";
+    const selectedVertexModel = config.vertexModel || DEFAULT_MODEL;
     ensureModelOption(vertexModel, selectedVertexModel);
     vertexModel.value = selectedVertexModel;
     rememberNotionToken.checked = Boolean(config.rememberNotionToken);
@@ -593,7 +599,7 @@ loadModelsButton.addEventListener("click", async () => {
     const result = await send("LIST_MODELS");
     const select = activeModelElement();
     const previous = select.value.trim();
-    renderModels(select, result.models, previous);
+    renderModels(select, result.models, previous, result.recommended);
     modelSummary.textContent = `完成，共有 ${result.models.length} 個可選模型。目前選擇：${select.value}。`;
     showStatus(`已完整掃描 ${result.models.length} 個可用文字模型。選好後請按「儲存設定」。`, "success");
   } catch (error) {

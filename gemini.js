@@ -15,6 +15,19 @@
   "use strict";
 
   const DEFAULT_MODEL = "gemini-3.5-flash-lite";
+  // Cost-efficient Flash-Lite first, then current Flash/Pro text models from
+  // https://ai.google.dev/gemini-api/docs/models (last checked 2026-09).
+  const MODEL_PRIORITY = Object.freeze([
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-2.5-flash-lite",
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-2.5-flash",
+    "gemini-2.5-pro"
+  ]);
   const DIRECT_TEXT_LIMIT = 180000;
   const CHUNK_TEXT_LIMIT = 78000;
   const MAX_OUTPUT_TOKENS = 8192;
@@ -1039,16 +1052,37 @@
     }).join("\n\n");
   }
 
+  function modelNames(models) {
+    return (Array.isArray(models) ? models : [])
+      .map(model => typeof model === "string" ? shared.normalizeModelName(model) : shared.normalizeModelName(model?.name))
+      .filter(Boolean);
+  }
+
+  /**
+   * First MODEL_PRIORITY name that actually appears in `models`, else the
+   * first entry. Used so 「建議」 tracks the live LIST_MODELS result instead
+   * of a hard-coded id that may be absent for a given key.
+   */
+  function recommendedModelName(models) {
+    const names = modelNames(models);
+    return MODEL_PRIORITY.find(name => names.includes(name)) || names[0] || DEFAULT_MODEL;
+  }
+
+  /**
+   * Keep a stored selection when it is still in the live list; otherwise
+   * fall back to the recommended-in-list model, then the first entry.
+   */
+  function pickAvailableModel(models, selected) {
+    const names = modelNames(models);
+    const current = shared.normalizeModelName(selected);
+    if (current && names.includes(current)) return current;
+    const recommended = MODEL_PRIORITY.find(name => names.includes(name));
+    if (recommended) return recommended;
+    return names[0] || DEFAULT_MODEL;
+  }
+
   function usableModels(response) {
     const excluded = /(embedding|imagen|veo|lyria|tts|live|audio|image|computer-use|robotics|omni|coder|codex|code-specialized)/i;
-    const priority = [
-      "gemini-3.5-flash-lite",
-      "gemini-3.1-flash-lite",
-      "gemini-2.5-flash-lite",
-      "gemini-3.6-flash",
-      "gemini-3.5-flash",
-      "gemini-2.5-flash"
-    ];
     const models = (response?.models ?? [])
       .filter(model => (model.supportedGenerationMethods ?? [])
         .some(method => String(method).toLowerCase() === "generatecontent"))
@@ -1062,8 +1096,8 @@
       .filter(model => /^gemini-/i.test(model.name) && !excluded.test(model.name));
     const unique = [...new Map(models.map(model => [model.name, model])).values()];
     return unique.sort((a, b) => {
-      const aPriority = priority.indexOf(a.name);
-      const bPriority = priority.indexOf(b.name);
+      const aPriority = MODEL_PRIORITY.indexOf(a.name);
+      const bPriority = MODEL_PRIORITY.indexOf(b.name);
       if (aPriority >= 0 || bPriority >= 0) {
         if (aPriority < 0) return 1;
         if (bPriority < 0) return -1;
@@ -1086,6 +1120,7 @@
     DEFAULT_MODEL,
     DIRECT_TEXT_LIMIT,
     MAX_OUTPUT_TOKENS,
+    MODEL_PRIORITY,
     buildAnalysisRequest,
     buildChunkRepairRequest,
     buildChunkRequest,
@@ -1108,6 +1143,8 @@
     responseDiagnostic,
     sanitizeDiagnostic,
     thinkingConfigForModel,
+    pickAvailableModel,
+    recommendedModelName,
     usableModels,
     validateAnalysis,
     validateChunkNotes,

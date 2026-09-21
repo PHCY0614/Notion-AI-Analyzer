@@ -128,6 +128,24 @@ function testAdvancedSettingsHidePromptControls() {
     assert.doesNotMatch(html, new RegExp(`id="${id}"`));
   }
   assert.doesNotMatch(options, /analysisPrompt|promptCustomized|GET_PROMPT_PREVIEW/);
+  assert.doesNotMatch(source("background/messages.js"), /GET_PROMPT_PREVIEW/);
+  const settings = source("background/settings.js");
+  assert.doesNotMatch(settings, /finalPromptPreview|defaultPromptUpdated|defaultAnalysisPrompt/);
+  assert.match(settings, /delete publicConfig\.analysisPrompt/);
+}
+
+function testReanalyzeConfirmHelper() {
+  const popup = source("popup.js");
+  assert.match(popup, /function confirmDestructiveReanalysis\(\)/);
+  assert.match(popup, /已確認的 AI 主題/);
+  assert.match(popup, /需要重新確認主題/);
+  assert.equal(
+    (popup.match(/confirmDestructiveReanalysis\(\)/g) || []).length,
+    3,
+    "current-page and recent-list reanalyze must share one confirm helper"
+  );
+  assert.doesNotMatch(popup, /confirm\("重新分析/);
+  assert.match(source("popup.html"), /id="reanalyze-hint"/);
 }
 
 function testCustomSelectArrow() {
@@ -158,5 +176,6 @@ testDiagnosticsExcludeContent();
 testBoundedPageSummaries();
 testRepositoryGuards();
 testAdvancedSettingsHidePromptControls();
+testReanalyzeConfirmHelper();
 testCustomSelectArrow();
 console.log("security regression tests passed");
