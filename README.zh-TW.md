@@ -1,8 +1,10 @@
-# Notion AI 分析工具
+# Siftly
+
+**AI Content Organiser for Notion**
 
 > 讓 AI 負責初步整理，讓你保留最後的分類決定權。
 
-這是一個協助你使用 AI 整理 Notion 文章的 Chrome 擴充功能。
+Siftly 是一個協助你使用 AI 整理 Notion 文章的 Chrome 擴充功能。
 它會分析頁面中的純文字，產生繁體中文標題、摘要、關鍵字與暫定主題，再將結果寫回 Notion。
 
 英文版：[`README.md`](README.md)

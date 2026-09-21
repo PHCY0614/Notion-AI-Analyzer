@@ -79,7 +79,15 @@ body {
 
 .app { padding: 19px; }
 header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
-.eyebrow { color: var(--green); font-size: 10px; font-weight: 850; letter-spacing: .12em; }
+.eyebrow {
+  display: block;
+  max-width: 260px;
+  color: var(--green);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  line-height: 1.35;
+}
 h1 { margin: 2px 0 0; font-size: 23px; letter-spacing: -.03em; }
 h2 { margin: 0; font-size: 15px; }
 button { font: inherit; }

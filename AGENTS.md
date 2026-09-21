@@ -1,4 +1,4 @@
-# Notion AI Analyzer Development Rules
+# Siftly Development Rules
 
 This project prioritizes behavioral stability.
 

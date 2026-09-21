@@ -1,8 +1,10 @@
-# Notion AI Analyzer
+# Siftly
+
+**AI Content Organiser for Notion**
 
 > Let AI handle the first pass while you keep the final say over how your knowledge base is organized.
 
-Notion AI Analyzer is a Chrome extension that helps you organize articles stored in Notion. It analyzes the plain text of a page, generates a Traditional Chinese title, summary, keywords, and provisional topics, and writes the results back to Notion.
+Siftly is a Chrome extension that helps you organize articles stored in Notion. It analyzes the plain text of a page, generates a Traditional Chinese title, summary, keywords, and provisional topics, and writes the results back to Notion.
 
 Traditional Chinese: [`README.zh-TW.md`](README.zh-TW.md)
 
@@ -27,7 +29,7 @@ This extension therefore separates the workflow into two stages. AI first analyz
 
 ## What You Can Use It For
 
-Notion AI Analyzer is suitable for organizing:
+Siftly is suitable for organizing:
 
 - Saved articles and read-later collections
 - Reading notes and research material
