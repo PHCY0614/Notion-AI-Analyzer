@@ -5,7 +5,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const root = path.resolve(__dirname, "..");
-const SUBTITLE = "AI Content Organiser for Notion";
+const EN_SUBTITLE = "AI Content Organiser for Notion";
+const ZH_SUBTITLE = "Notion x AI 內容整理工具";
 const OLD_PRODUCT_NAME = /Notion AI Analyzer|Notion AI 分析工具|AI 分析工具/;
 
 function source(name) {
@@ -16,7 +17,7 @@ function testManifestBrand() {
   const manifest = JSON.parse(source("manifest.json"));
   assert.equal(manifest.name, "Siftly");
   assert.equal(manifest.action.default_title, "Siftly");
-  assert.equal(manifest.description, SUBTITLE);
+  assert.equal(manifest.description, EN_SUBTITLE);
   assert.match(manifest.description, /Organiser/);
   assert.doesNotMatch(manifest.description, /Organizer/);
   assert.ok(manifest.description.length <= 132, "Chrome Web Store short description limit is 132 characters");
@@ -38,10 +39,19 @@ function testUserFacingCopy() {
     assert.doesNotMatch(text, OLD_PRODUCT_NAME, `${name} still uses the old product name`);
   }
 
-  for (const name of ["popup.html", "options.html", "README.md", "README.zh-TW.md", "PRIVACY.md", "PRIVACY.zh-TW.md"]) {
+  const englishFiles = ["README.md", "PRIVACY.md"];
+  for (const name of englishFiles) {
     const text = source(name);
-    assert.match(text, /AI Content Organiser for Notion/, `${name} must use the store subtitle`);
+    assert.match(text, new RegExp(EN_SUBTITLE), `${name} must use the English subtitle`);
     assert.doesNotMatch(text, /AI Content Organizer for Notion/, `${name} must use British Organiser`);
+    assert.doesNotMatch(text, new RegExp(ZH_SUBTITLE), `${name} should not use the Traditional Chinese subtitle`);
+  }
+
+  const chineseFiles = ["popup.html", "options.html", "README.zh-TW.md", "PRIVACY.zh-TW.md"];
+  for (const name of chineseFiles) {
+    const text = source(name);
+    assert.match(text, new RegExp(ZH_SUBTITLE), `${name} must use the Traditional Chinese subtitle`);
+    assert.doesNotMatch(text, new RegExp(EN_SUBTITLE), `${name} should not use the English subtitle`);
   }
 }
 

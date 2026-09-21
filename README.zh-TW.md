@@ -1,6 +1,6 @@
 # Siftly
 
-**AI Content Organiser for Notion**
+**Notion x AI 內容整理工具**
 
 > 讓 AI 負責初步整理，讓你保留最後的分類決定權。
 
