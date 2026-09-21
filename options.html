@@ -9,14 +9,16 @@
 <body>
   <main class="shell">
     <header class="hero">
-      <span class="eyebrow">Notion x AI 內容整理工具</span>
-      <h1>Siftly</h1>
-      <p>讀取 Notion 頁面的純文字，寫入固定的 AI 分析欄位；不更動原始標題、頁面正文或其他欄位。</p>
+      <div class="hero-title-row">
+        <h1>Siftly</h1>
+        <span class="hero-subtitle">Notion x AI 內容整理工具</span>
+      </div>
+      <p class="hero-summary">讀取 Notion 頁面的純文字，寫入固定的 AI 分析欄位；不更動原始標題、頁面正文或其他欄位。</p>
     </header>
 
     <aside class="notice privacy-notice" role="note" aria-label="資料傳送說明">
       <strong>資料傳送說明</strong>
-      <span>執行文章分析時，指定 Notion 頁面的純文字、分析提示詞、輸出規格與關鍵字排除清單會直接傳送至你選擇的 Google AI 服務；合格結果會寫回同一個 Notion 資料庫。資料不會經過開發者營運的中介伺服器。<a href="https://github.com/PHCY0614/Notion-AI-Analyzer/blob/main/PRIVACY.zh-TW.md" target="_blank" rel="noreferrer">查看完整隱私與資料流說明</a></span>
+      <span>分析文章時，會把該頁的純文字直接傳送到你選擇的 Google AI，結果寫回同一個 Notion 資料庫；過程不經過開發者營運的中介伺服器。整理主題時只傳送主題名稱，不傳送完整文章。<a href="https://github.com/PHCY0614/Notion-AI-Analyzer/blob/main/PRIVACY.zh-TW.md" target="_blank" rel="noreferrer">查看完整隱私與資料流說明</a></span>
     </aside>
 
     <form id="settings-form" novalidate>
@@ -56,7 +58,7 @@
           <select id="notion-data-source">
             <option value="" disabled>請選擇資料庫</option>
           </select>
-          <p class="hint">每個選項代表一個 Data Source。選擇後仍需按「儲存設定」，不會自動測試連線或修改 Notion 欄位。</p>
+          <p class="hint">選擇後仍需按「儲存設定」，不會自動測試連線或修改 Notion 欄位。</p>
         </div>
         <p id="database-change-warning" class="database-change-warning" role="note" hidden>儲存後將切換作用中的資料庫，並清除目前資料庫的本機執行清單、近期結果與主題整理狀態；Notion 中既有內容不會被刪除。</p>
 
@@ -64,7 +66,7 @@
           <summary>進階設定：手動輸入資料庫網址或 ID</summary>
           <label for="notion-target">Notion 資料庫網址或 Data Source ID</label>
           <input id="notion-target" name="notionTarget" type="text" autocomplete="off" spellcheck="false" placeholder="貼上資料庫網址，或擷取工具顯示的 Data Source ID" required>
-          <p class="hint">若 Search 索引尚未更新、資料庫未出現在清單或超過載入上限，可繼續手動輸入。若資料庫有多個 Data Source，請填入精確 ID。</p>
+          <p class="hint">若資料庫未出現在清單，可改為手動輸入網址或 ID。若同一個資料庫有多個來源，請填入精確 ID。</p>
         </details>
       </section>
 
@@ -126,7 +128,7 @@
           </div>
           <button id="load-models" class="button secondary compact" type="button">掃描所有可用模型</button>
         </div>
-        <p id="model-summary" class="hint">Google AI Studio 可掃描 Key 可見模型；Vertex AI 使用建議模型。</p>
+        <p id="model-summary" class="hint">可掃描目前金鑰看得到的模型；Vertex AI 使用建議模型。</p>
 
         <aside class="notice" role="note">
           <strong>金鑰與帳務提醒</strong>
@@ -138,21 +140,19 @@
         <div class="section-heading">
           <span class="step">3</span>
           <div>
-            <h2 id="fields-heading">準備 Notion 欄位</h2>
-            <p>資料庫必須先有「整理狀態」選取欄位與「待分析」選項；缺少時工具會停止並指出該怎麼處理。</p>
+            <h2 id="fields-heading">這個工具會用到的欄位</h2>
+            <p>這個工具會用到的欄位，不會影響你的內容與現有欄位。</p>
           </div>
         </div>
-        <p class="hint">必要欄位檢查通過後，測試連線會補上工具缺少的 AI 欄位與其他流程狀態；不會刪除、改名或修改你自行建立的其他選項。</p>
-        <div class="field-grid" aria-label="工具管理的欄位">
-          <span><b>AI 標題</b><small>rich_text</small></span>
-          <span><b>AI 主題</b><small>multi_select</small></span>
-          <span><b>AI 暫定主題</b><small>rich_text</small></span>
-          <span><b>AI 關鍵字</b><small>rich_text</small></span>
-          <span><b>AI 摘要</b><small>rich_text</small></span>
-          <span><b>整理狀態</b><small>select</small></span>
+        <p class="hint">按「測試連線並準備欄位」會補齊缺少的欄位；缺少「整理狀態」時會先詢問，接著請在 Notion 把文章標成「待分析」，才能開始整理。分析後工具會先寫暫定主題，正式主題須你確認整理後才寫入。</p>
+        <div class="field-grid" aria-label="工具會用到的欄位">
+          <span><b>AI 標題</b></span>
+          <span><b>AI 主題</b></span>
+          <span><b>AI 暫定主題</b></span>
+          <span><b>AI 關鍵字</b></span>
+          <span><b>AI 摘要</b></span>
+          <span><b>整理狀態</b></span>
         </div>
-        <p class="hint">文章分析一律只產生「AI 暫定主題」，不會讀取或改動「AI 主題」。標準主題只會由下方的主題整理或單篇確認流程疊加寫入。</p>
-        <p class="hint">狀態流程：待分析 → 分析中 → 已分析；尚未建立標準分類時為待主題整理，仍有無法對應項目時為待主題確認，失敗時為分析失敗。</p>
 
         <label for="excluded-person-terms">關鍵字排除清單</label>
         <textarea id="excluded-person-terms" name="excludedPersonTerms" rows="4" spellcheck="false" placeholder="每行或逗號分隔，例如：A、B、C、D"></textarea>
@@ -164,7 +164,7 @@
           <span class="step">4</span>
           <div>
             <h2 id="advanced-heading">進階分析設定</h2>
-            <p>調整分析結果的輸出規格與單次 AI 等待時間。</p>
+            <p>調整標題、主題、關鍵字、摘要的字數與數量，以及單次 AI 等待時間。</p>
           </div>
         </div>
         <p id="output-spec-summary" class="hint">目前分析規格：標題最多 12 字｜主題 1～3 個｜關鍵字 5 個｜摘要 100～250 字</p>
@@ -192,14 +192,14 @@
           <span class="step">5</span>
           <div>
             <h2 id="organizer-heading">整理主題</h2>
-            <p>每次最多整理 75 個去重後的 AI 暫定主題，只使用整理狀態、AI 暫定主題與 AI 主題。AI 會提出可共用的中等粒度分類，其餘交由人工確認。</p>
+            <p>把暫定主題收成可共用的分類，再由你確認。</p>
           </div>
         </div>
         <label class="check-row">
           <input id="prefer-existing-topics" type="checkbox">
           <span>優先沿用既有主題</span>
         </label>
-        <p class="hint">適合已有穩定分類的資料庫。開啟後，具體情境、行為、策略或子類型只要能由既有主題合理涵蓋，就會優先建議沿用；不適合時仍可建立新主題。設定依目前的 Notion 資料庫分別保存，並於下次掃描建議時生效。</p>
+        <p class="hint">適合已有穩定分類的資料庫。開啟後，只要能由既有主題合理涵蓋，就會優先建議沿用；不適合時仍可建立新主題。</p>
         <div class="inline-actions">
           <button id="prepare-topics" class="button secondary" type="button">掃描並產生整理建議</button>
           <button id="select-high" class="button secondary" type="button">勾選高信心建議</button>
@@ -282,7 +282,7 @@
       <div class="confirm-dialog__body">
         <h2 id="notion-status-dialog-title">準備 Notion 整理狀態</h2>
         <p id="notion-status-dialog-message"></p>
-        <p id="notion-status-dialog-scope" class="confirm-dialog__scope">只會新增或補齊「整理狀態」這個 Select 欄位及分析流程需要的狀態選項；既有欄位、既有選項與文章內容都會保留。</p>
+        <p id="notion-status-dialog-scope" class="confirm-dialog__scope">只會新增或補齊「整理狀態」這個欄位及分析流程需要的狀態選項；既有欄位、既有選項與文章內容都會保留。</p>
       </div>
       <div class="confirm-dialog__actions">
         <button id="notion-status-cancel" class="button primary" type="submit" value="cancel" autofocus>暫不新增</button>

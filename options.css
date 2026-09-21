@@ -68,19 +68,32 @@ body {
 }
 
 .hero { margin-bottom: 30px; }
-.eyebrow {
-  display: block;
+.hero-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 14px;
+  row-gap: 4px;
+  margin: 0 0 12px;
+}
+.hero-title-row h1 { margin: 0; }
+.hero-subtitle {
   color: var(--green);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: .04em;
-  line-height: 1.4;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  line-height: 1.35;
+}
+.hero-summary {
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.6;
 }
 
 h1 { margin: 8px 0 10px; font-size: clamp(30px, 5vw, 46px); letter-spacing: -.04em; }
 h2 { margin: 0; font-size: 20px; }
 p { margin: 0; }
-.hero p, .section-heading p { color: var(--muted); }
+.section-heading p { color: var(--muted); }
 
 form { display: grid; gap: 18px; }
 .panel {
@@ -275,14 +288,12 @@ input:focus, select:focus, textarea:focus { border-color: var(--green); box-shad
 .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .field-grid span {
   display: flex;
-  justify-content: space-between;
-  gap: 12px;
+  align-items: center;
   padding: 11px 13px;
   border-radius: 10px;
   background: #f3f6f3;
   font-size: 14px;
 }
-.field-grid small { color: var(--muted); }
 
 .actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .button {
