@@ -16,7 +16,7 @@
 
     <aside class="notice privacy-notice" role="note" aria-label="資料傳送說明">
       <strong>資料傳送說明</strong>
-      <span>執行文章分析時，指定 Notion 頁面的純文字、分析提示詞、輸出規格與人物排除清單會直接傳送至你選擇的 Google AI 服務；合格結果會寫回同一個 Notion 資料庫。資料不會經過開發者營運的中介伺服器。<a href="https://github.com/PHCY0614/Notion-AI-Analyzer/blob/main/PRIVACY.zh-TW.md" target="_blank" rel="noreferrer">查看完整隱私與資料流說明</a></span>
+      <span>執行文章分析時，指定 Notion 頁面的純文字、分析提示詞、輸出規格與關鍵字排除清單會直接傳送至你選擇的 Google AI 服務；合格結果會寫回同一個 Notion 資料庫。資料不會經過開發者營運的中介伺服器。<a href="https://github.com/PHCY0614/Notion-AI-Analyzer/blob/main/PRIVACY.zh-TW.md" target="_blank" rel="noreferrer">查看完整隱私與資料流說明</a></span>
     </aside>
 
     <form id="settings-form" novalidate>
@@ -152,11 +152,11 @@
           <span><b>整理狀態</b><small>select</small></span>
         </div>
         <p class="hint">文章分析一律只產生「AI 暫定主題」，不會讀取或改動「AI 主題」。標準主題只會由下方的主題整理或單篇確認流程疊加寫入。</p>
-        <label for="excluded-person-terms">人物與代稱排除清單</label>
-        <textarea id="excluded-person-terms" name="excludedPersonTerms" rows="4" spellcheck="false" placeholder="每行或逗號分隔，例如：A、B、C、D"></textarea>
-        <p class="hint">這些名稱不會被寫入 AI 關鍵字。適合填入敘事角色、匿名字母、姓氏或固定暱稱；預設留白，可隨時增刪。</p>
-        <p class="hint">新主題通常為 2 至 4 字、最多 5 字，並應代表一個完整的分類概念。連接詞或符號若屬於專有名稱或完整術語的一部分，可以保留。</p>
         <p class="hint">狀態流程：待分析 → 分析中 → 已分析；尚未建立標準分類時為待主題整理，仍有無法對應項目時為待主題確認，失敗時為分析失敗。</p>
+
+        <label for="excluded-person-terms">關鍵字排除清單</label>
+        <textarea id="excluded-person-terms" name="excludedPersonTerms" rows="4" spellcheck="false" placeholder="每行或逗號分隔，例如：A、B、C、D"></textarea>
+        <p class="hint">清單中的字詞不會被寫入 AI 關鍵字。可加入任何你希望排除的名稱、代稱、常用詞或其他詞彙。預設留白，可隨時增刪。</p>
       </section>
 
       <section class="panel" id="advanced-settings" aria-labelledby="advanced-heading">

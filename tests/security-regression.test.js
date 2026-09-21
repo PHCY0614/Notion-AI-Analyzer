@@ -121,9 +121,33 @@ function testAdvancedSettingsHidePromptControls() {
   assert.doesNotMatch(options, /analysisPrompt|promptCustomized|GET_PROMPT_PREVIEW/);
 }
 
+function testCustomSelectArrow() {
+  const uiSelect = source("ui-select.js");
+  assert.doesNotMatch(uiSelect, /⌄/);
+  assert.match(uiSelect, /createElementNS\("http:\/\/www\.w3\.org\/2000\/svg", "svg"\)/);
+  for (const attribute of [
+    ["width", "11"],
+    ["height", "11"],
+    ["viewBox", "0 0 12 12"],
+    ["fill", "none"],
+    ["stroke", "currentColor"],
+    ["stroke-width", "2.2"],
+    ["stroke-linecap", "round"],
+    ["stroke-linejoin", "round"],
+    ["aria-hidden", "true"]
+  ]) {
+    assert.match(uiSelect, new RegExp(`setAttribute\\("${attribute[0]}", "${attribute[1]}"\\)`));
+  }
+  assert.match(uiSelect, /createElementNS\("http:\/\/www\.w3\.org\/2000\/svg", "polyline"\)/);
+  assert.match(uiSelect, /setAttribute\("points", "2,4 6,8 10,4"\)/);
+  assert.match(source("options.css"), /\.custom-select__arrow \{[^}]*flex: 0 0 11px;[^}]*width: 11px;[^}]*height: 11px;/);
+  assert.match(source("popup.css"), /\.custom-select__arrow \{[^}]*flex: 0 0 11px;[^}]*width: 11px;[^}]*height: 11px;/);
+}
+
 testOutputCap();
 testDiagnosticsExcludeContent();
 testBoundedPageSummaries();
 testRepositoryGuards();
 testAdvancedSettingsHidePromptControls();
+testCustomSelectArrow();
 console.log("security regression tests passed");

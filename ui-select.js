@@ -44,10 +44,20 @@
     trigger.setAttribute("aria-expanded", "false");
     const value = document.createElement("span");
     value.className = "custom-select__value";
-    const arrow = document.createElement("span");
-    arrow.className = "custom-select__arrow";
+    const arrow = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    arrow.setAttribute("class", "custom-select__arrow");
+    arrow.setAttribute("width", "11");
+    arrow.setAttribute("height", "11");
+    arrow.setAttribute("viewBox", "0 0 12 12");
+    arrow.setAttribute("fill", "none");
+    arrow.setAttribute("stroke", "currentColor");
+    arrow.setAttribute("stroke-width", "2.2");
+    arrow.setAttribute("stroke-linecap", "round");
+    arrow.setAttribute("stroke-linejoin", "round");
     arrow.setAttribute("aria-hidden", "true");
-    arrow.textContent = "⌄";
+    const arrowLine = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+    arrowLine.setAttribute("points", "2,4 6,8 10,4");
+    arrow.append(arrowLine);
     trigger.append(value, arrow);
 
     const menu = document.createElement("div");

@@ -166,7 +166,7 @@ input[type="text"], input[type="password"], input[type="number"], select, textar
   box-shadow: 0 0 0 3px rgba(23, 107, 69, .13);
 }
 .custom-select__value { overflow: hidden; min-width: 0; text-overflow: ellipsis; white-space: nowrap; }
-.custom-select__arrow { flex: 0 0 auto; color: var(--green-dark); font-size: 18px; line-height: 1; transition: transform .18s; }
+.custom-select__arrow { display: block; flex: 0 0 11px; width: 11px; height: 11px; color: var(--green-dark); transition: transform .18s; }
 .custom-select__trigger[aria-expanded="true"] .custom-select__arrow { transform: rotate(180deg); }
 .custom-select__menu {
   position: absolute;
