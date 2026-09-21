@@ -2,6 +2,8 @@
 
 **AI Content Organiser for Notion**
 
+*Product UI and AI output are currently in Traditional Mandarin (Taiwan); an English UI is planned later.*
+
 > Let AI handle the first pass while you keep the final say over how your knowledge base is organized.
 
 Siftly is a Chrome extension that helps you organize articles stored in Notion. It analyzes the plain text of a page, generates a Traditional Chinese title, summary, keywords, and provisional topics, and writes the results back to Notion.
