@@ -1,0 +1,14 @@
+{
+  "name": "notion-ai-analyzer",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Chrome MV3 extension that analyzes Notion articles with Google AI Studio or Vertex AI.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node scripts/run-tests.js",
+    "check": "npm test"
+  }
+}

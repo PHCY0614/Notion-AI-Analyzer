@@ -167,6 +167,18 @@ If a request exceeds the selected limit, the extension stops that request and pa
 
 This project was conceived and is maintained by Penny Hsieh, who defines the requirements, workflows, interface direction, and acceptance criteria. The implementation, refactoring, and documentation were developed primarily with assistance from OpenAI Codex. Product direction and release decisions remain the responsibility of Penny Hsieh.
 
+## Running tests
+
+The extension has no separate build step. Chrome loads the unpacked files from the repository root.
+
+Development checks require Node.js 18 or later. From the project root, run:
+
+```bash
+npm test
+```
+
+This runs the existing Node tests in `tests/` (built-in `assert`, no extra test runner package). `npm run check` currently does the same thing and is the documented full check command.
+
 ## Privacy
 
 The extension does not use a developer-operated relay server and does not include analytics or telemetry.
