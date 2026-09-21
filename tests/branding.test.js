@@ -75,7 +75,7 @@ function testSettingsPageCopy() {
   assert.match(html, /不經過開發者營運的中介伺服器/);
   assert.doesNotMatch(html, /分析提示詞/);
 
-  assert.match(html, /id="fields-heading">這個工具會用到的欄位/);
+  assert.match(html, /id="fields-heading">準備 Notion 欄位/);
   assert.match(html, /這個工具會用到的欄位，不會影響你的內容與現有欄位。/);
   assert.match(
     html,
