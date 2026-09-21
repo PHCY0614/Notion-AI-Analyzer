@@ -3,6 +3,7 @@
 // ==== DOM references and local UI state ====
 const form = document.querySelector("#settings-form");
 const statusBox = document.querySelector("#status");
+const customPromptClearedNotice = document.querySelector("#custom-prompt-cleared-notice");
 const notionToken = document.querySelector("#notion-token");
 const notionTarget = document.querySelector("#notion-target");
 const notionDataSourceSelect = document.querySelector("#notion-data-source");
@@ -489,6 +490,7 @@ async function loadConfig() {
     updateProviderUi();
     syncEnhancedSelects();
     updateDatabaseChangeWarning();
+    customPromptClearedNotice.hidden = !config.customPromptCleared;
     if (config.providerReselectionRequired) {
       showStatus("舊版 AI 服務已移除。請選擇 Google AI Studio 或 Vertex AI，填入金鑰後儲存設定。", "info");
     }

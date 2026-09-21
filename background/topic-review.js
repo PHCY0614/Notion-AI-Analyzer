@@ -177,14 +177,21 @@ function compactNotionId(value) {
 }
 
 function pageBelongsToConfiguredSource(page, config) {
-  const parentId = page?.parent?.data_source_id || page?.parent?.database_id || "";
-  return [config.dataSourceId, config.databaseId].some(id => id && compactNotionId(id) === compactNotionId(parentId));
+  const pageSourceId = compactNotionId(page?.parent?.data_source_id);
+  const configuredSourceId = compactNotionId(config.dataSourceId);
+  if (pageSourceId) {
+    return Boolean(configuredSourceId && pageSourceId === configuredSourceId);
+  }
+  const pageDatabaseId = compactNotionId(page?.parent?.database_id);
+  const configuredDatabaseId = compactNotionId(config.databaseId);
+  return Boolean(pageDatabaseId && configuredDatabaseId && pageDatabaseId === configuredDatabaseId);
 }
 
 async function inspectPage(pageId) {
   const id = S.extractNotionId(pageId);
   if (!id) throw new AppError("目前分頁不是可辨識的 Notion 頁面", { code: "PAGE_ID_INVALID" });
-  const { config, token } = await readyNotion();
+  // Popup open and REANALYZE_PAGE identity checks: GET only, no schema PATCH.
+  const { config, token } = await readyNotion({ mutateSchema: false });
   const page = await notionRequest(`/v1/pages/${id}`, { token });
   if (!pageBelongsToConfiguredSource(page, config)) {
     throw new AppError("這個頁面不屬於目前設定的 Notion 資料庫", { code: "PAGE_OUTSIDE_DATA_SOURCE" });
@@ -203,7 +210,7 @@ async function inspectPage(pageId) {
 
 /**
  * Opens a single-page topic review from the current Notion page's AI 暫定主題.
- * Reads the page (readyNotion may update schema). If status is 待主題整理,
+ * Reads the page (readyNotion may PATCH missing schema). If status is 待主題整理,
  * writes 待主題確認 so the page matches the review session. Does not call AI
  * and does not move names into AI 主題; resolveTopicReview does that later.
  */

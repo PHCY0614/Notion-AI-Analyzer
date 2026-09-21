@@ -1,6 +1,6 @@
 # Privacy and data flow
 
-Last updated: September 20, 2026
+Last updated: September 21, 2026
 
 Developed and maintained by Penny Hsieh.
 
@@ -34,14 +34,14 @@ Chrome permissions are `storage`, `alarms`, and `activeTab`. Host permissions ar
    The options-page database list is also fetched directly from the Notion Search API and only when you click load or refresh.
 2. For single-page and batch article analysis, the following are sent to the currently selected AI provider (Google AI Studio at `generativelanguage.googleapis.com` or Vertex AI at `aiplatform.googleapis.com`):
    - Notion page plain text
-   - the analysis prompt you have configured
+   - the built-in analysis prompt
    - the output spec
    - the excluded-person terms list
 
    Providers you did not select do not receive the article. Listing models and testing the connection send the key to the currently selected provider. The Vertex test also sends the fixed string `連線測試` and does not include a Notion page.
 3. Returned JSON is checked locally for shape, length, and counts. Article-analysis requests do not include existing confirmed AI topics (`AI 主題`) or the local topic dictionary, and the analysis step does not select confirmed `AI 主題`. Batch analysis does not write `AI 主題`. Single-page reanalysis clears confirmed AI topics and then enters the topic-confirmation flow.
 4. Batch topic organising sends only this batch’s distinct provisional topic (`AI 暫定主題`) names and optional existing confirmed AI topic (`AI 主題`) names. Page body, page title, AI title, summary, keywords, occurrence counts, co-occurrence, and impact counts are not sent for classification.
-5. Accepted results are written back to `api.notion.com`. During a connection test, if the `整理狀態` Select property or the `待分析` option is missing, the settings page asks for confirmation first. The extension creates that property or completes the required workflow options only after the user chooses `新增並繼續` (“Add and continue”). It does not convert an existing property to another type, delete user-created options, or rename them. After that preparation, testing the connection, scanning, starting a queue, or opening the popup on a Notion page may PATCH other missing AI properties and remaining workflow options.
+5. Accepted results are written back to `api.notion.com`. During a connection test, if the `整理狀態` Select property or the `待分析` option is missing, the settings page asks for confirmation first. The extension creates that property or completes the required workflow options only after the user chooses `新增並繼續` (“Add and continue”). It does not convert an existing property to another type, delete user-created options, or rename them. After that preparation, testing the connection (`測試連線並準備欄位`), scanning, or starting a queue may PATCH other missing AI properties and remaining workflow options. Opening the popup inspects the current page without PATCHing schema.
 
 The extension developer does not operate a separate intermediary server and the extension has no analytics or telemetry. Google AI Studio and Vertex AI handling depends on the project, plan, and Google’s current terms.
 
@@ -80,4 +80,4 @@ Limit which pages the Notion Integration can access. Manage API keys, quotas, an
 
 ## Contact
 
-For privacy or data-handling questions, use the project’s [GitHub Issues](https://github.com/PHCY0614/Notion-AI-Analyzer/issues). Do not post API keys, Notion tokens, article content, or other private information in a public issue.
+For privacy or data-handling questions, use the project’s [GitHub Issues](https://github.com/PHCY0614/siftly/issues). Do not post API keys, Notion tokens, article content, or other private information in a public issue.

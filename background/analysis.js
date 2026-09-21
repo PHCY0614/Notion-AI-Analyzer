@@ -196,7 +196,7 @@ async function analyzeArticle(articleText, config, signal) {
   const { apiKey, model, provider } = await activeAiContext(config);
   const excludedPersonTerms = normalizeExcludedPersonTerms(config.excludedPersonTerms);
   const analysisOptions = {
-    customPrompt: config.analysisPromptCustomized ? config.analysisPrompt : "",
+    customPrompt: "",
     outputSpec: P.normalizeOutputSpec(config.outputSpec),
     requestTimeoutMinutes: Number(config.requestTimeoutMinutes) || 0
   };

@@ -50,7 +50,11 @@ const buttons = {
 const organizeTopicsButton = document.querySelector("#organize-topics");
 const reanalyzeHint = document.querySelector("#reanalyze-hint");
 const REANALYZE_CONFIRM_MESSAGE = "重新分析會重新產生 AI 分析結果，並清除既有已確認的 AI 主題；之後需要重新確認主題。確定繼續嗎？";
+const BATCH_AI_UNKNOWN_PAGES = "佇列中的待處理／失敗頁面";
+const BATCH_AI_PRIVACY_REMINDER = "文章純文字會傳送到你選擇的 Google AI。未付費的 AI Studio 可能將內容用於改善產品。";
 let configured = false;
+let lastConfig = null;
+let lastStatus = null;
 let actionBusy = false;
 let renderedReviewKey = "";
 let currentPageInfo = null;
@@ -79,6 +83,23 @@ function currentPageAction(info) {
  */
 function confirmDestructiveReanalysis() {
   return window.confirm(REANALYZE_CONFIRM_MESSAGE);
+}
+
+/**
+ * Shared wording for ANALYZE_ALL and RETRY_FAILED. SCAN_PENDING does not
+ * send article text to AI and is not gated here.
+ */
+function batchAiSendConfirmMessage(pageCountText, providerLabel) {
+  return `即將分析${pageCountText}，並把文章純文字傳送到你選擇的 ${providerLabel}。${BATCH_AI_PRIVACY_REMINDER}確定繼續嗎？`;
+}
+
+function confirmBatchAiSend(kind) {
+  const knownCount = kind === "retry"
+    ? Number(lastStatus?.failed?.length) || 0
+    : Number.isFinite(lastStatus?.knownPending) ? Number(lastStatus.knownPending) : 0;
+  const pageCountText = knownCount > 0 ? `約 ${knownCount} 頁` : BATCH_AI_UNKNOWN_PAGES;
+  const providerLabel = lastConfig?.aiProvider === "vertex" ? "Vertex AI" : "Google AI Studio";
+  return window.confirm(batchAiSendConfirmMessage(pageCountText, providerLabel));
 }
 
 // ==== Background messaging ====
@@ -211,11 +232,12 @@ function renderRecent(items) {
     const row = document.createElement("article");
     row.className = `recent-item${item.outcome === "failed" ? " failed" : ""}`;
 
-    const title = document.createElement(item.url ? "a" : "span");
+    const safeHref = AnalyzerShared.safeNotionPageHref(item.url);
+    const title = document.createElement(safeHref ? "a" : "span");
     title.className = "recent-title";
     title.textContent = item.title || "未命名文章";
-    if (item.url) {
-      title.href = item.url;
+    if (safeHref) {
+      title.href = safeHref;
       title.target = "_blank";
       title.rel = "noreferrer";
     }
@@ -283,8 +305,9 @@ function renderTopicReview(review) {
 
   const item = review.item || {};
   reviewPageTitle.textContent = item.title || "未命名文章";
-  if (item.url) {
-    reviewPageTitle.href = item.url;
+  const safeHref = AnalyzerShared.safeNotionPageHref(item.url);
+  if (safeHref) {
+    reviewPageTitle.href = safeHref;
     reviewPageTitle.removeAttribute("aria-disabled");
   } else {
     reviewPageTitle.removeAttribute("href");
@@ -434,7 +457,8 @@ function renderStatus(state) {
  * Classifies the active tab. Non-Notion stays surface other. A Notion URL
  * is first treated as a database view, then INSPECT_PAGE; success becomes
  * surface single with page info. Failure leaves surface database (batch
- * buttons) and clears page info. INSPECT_PAGE goes through readyNotion.
+ * buttons) and clears page info. INSPECT_PAGE is read-only: it does not
+ * PATCH Notion schema.
  */
 async function inspectCurrentPage() {
   currentPageInfo = null;
@@ -463,6 +487,8 @@ async function inspectCurrentPage() {
 async function refresh() {
   try {
     const [config, state] = await Promise.all([send("GET_CONFIG"), send("GET_STATUS")]);
+    lastConfig = config;
+    lastStatus = state;
     configured = Boolean(config.notionTarget && config.hasNotionToken && config.hasAiKey && config.activeModel);
     setupWarning.hidden = configured;
     renderStatus(state);
@@ -522,12 +548,18 @@ buttons.current.addEventListener("click", () => {
     force
   });
 });
-buttons.all.addEventListener("click", () => runAction("ANALYZE_ALL"));
+buttons.all.addEventListener("click", () => {
+  if (!confirmBatchAiSend("all")) return;
+  void runAction("ANALYZE_ALL");
+});
 buttons.scan.addEventListener("click", () => runAction("SCAN_PENDING"));
 buttons.queueControl.addEventListener("click", () => runAction(
   queueControlAction === "stop" ? "STOP_ANALYSIS" : "RESUME_ANALYSIS"
 ));
-buttons.retry.addEventListener("click", () => runAction("RETRY_FAILED"));
+buttons.retry.addEventListener("click", () => {
+  if (!confirmBatchAiSend("retry")) return;
+  void runAction("RETRY_FAILED");
+});
 buttons.approveTopic.addEventListener("click", () => runAction("RESOLVE_TOPIC_REVIEW", {
   action: "approve",
   rememberMapping: rememberTopicMapping.checked

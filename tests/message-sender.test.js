@@ -36,7 +36,10 @@ const localData = {
     analysisPromptCustomized: true,
     geminiModel: "gemini-test",
     notionTarget: "",
-    promptBaseVersion: "old"
+    promptBaseVersion: "old",
+    rememberGeminiKey: true,
+    rememberNotionToken: true,
+    rememberVertexKey: false
   },
   [STATE_KEY]: {
     current: null,
@@ -128,12 +131,28 @@ async function main() {
   assert.equal(config.data.defaultAnalysisPrompt, undefined);
   assert.equal(config.data.defaultPromptUpdated, undefined);
   assert.equal(config.data.geminiModel, "gemini-test");
+  assert.equal(config.data.customPromptCleared, true);
+  assert.equal(localData[CONFIG_KEY].analysisPrompt, "");
+  assert.equal(localData[CONFIG_KEY].analysisPromptCustomized, false);
+  assert.equal(localData[CONFIG_KEY].rememberGeminiKey, true);
 
-  const saved = await send({ type: "SAVE_SETTINGS", settings: { geminiModel: "gemini-test-2" } });
+  const saved = await send({
+    type: "SAVE_SETTINGS",
+    settings: {
+      geminiModel: "gemini-test-2",
+      analysisPrompt: "不應再寫入的自訂提示詞",
+      analysisPromptCustomized: true
+    }
+  });
   assert.equal(saved.ok, true);
-  assert.equal(localData[CONFIG_KEY].analysisPromptCustomized, true);
-  assert.equal(localData[CONFIG_KEY].analysisPrompt, "舊版自訂分析提示詞");
+  assert.equal(saved.data.analysisPrompt, undefined);
+  assert.equal(saved.data.analysisPromptCustomized, undefined);
+  assert.equal(localData[CONFIG_KEY].analysisPromptCustomized, false);
+  assert.equal(localData[CONFIG_KEY].analysisPrompt, "");
   assert.equal(localData[CONFIG_KEY].geminiModel, "gemini-test-2");
+  assert.equal(localData[CONFIG_KEY].rememberGeminiKey, true);
+  assert.equal(localData[CONFIG_KEY].rememberNotionToken, true);
+  assert.equal(localData[CONFIG_KEY].rememberVertexKey, false);
 
   console.log("message sender tests passed");
 }
