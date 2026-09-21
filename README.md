@@ -150,16 +150,7 @@ These settings are applied to the AI prompt, output format, and result validatio
 
 For safety and predictable resource use, article plain text is limited to 120,000 characters. Near that limit, the extension asks the selected Google service to count the complete prompt and rejects requests above 350,000 input tokens. Generated responses are capped at 8,192 tokens.
 
-### Customize the Analysis Prompt
-
-You can edit the prompt used to analyze articles so it better matches your content and organization style. The settings page also lets you:
-
-- Copy the current prompt
-- Preview the prompt that will be sent
-- Restore the default prompt
-- Restore the default output specification
-
-The prompt and output specification are managed separately. Restoring one does not erase your custom settings for the other.
+The settings page does not display or edit the analysis prompt. It only exposes the output specification and the maximum wait time for a single AI request. Use “Restore Default Specification” to return to this version’s default output settings.
 
 ### AI Request Timeout
 

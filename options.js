@@ -21,7 +21,6 @@ const rememberVertexKey = document.querySelector("#remember-vertex-key");
 const geminiSettings = document.querySelector("#gemini-settings");
 const vertexSettings = document.querySelector("#vertex-settings");
 const excludedPersonTerms = document.querySelector("#excluded-person-terms");
-const analysisPrompt = document.querySelector("#analysis-prompt");
 const titleMax = document.querySelector("#title-max");
 const topicMin = document.querySelector("#topic-min");
 const topicMax = document.querySelector("#topic-max");
@@ -30,8 +29,6 @@ const summaryMin = document.querySelector("#summary-min");
 const summaryMax = document.querySelector("#summary-max");
 const outputSpecSummary = document.querySelector("#output-spec-summary");
 const requestTimeout = document.querySelector("#request-timeout");
-const promptState = document.querySelector("#prompt-state");
-const promptPreview = document.querySelector("#prompt-preview");
 const preferExistingTopics = document.querySelector("#prefer-existing-topics");
 const organizerSummary = document.querySelector("#organizer-summary");
 const topicGroups = document.querySelector("#topic-groups");
@@ -61,8 +58,6 @@ const notionStatusDialog = document.querySelector("#notion-status-dialog");
 const notionStatusDialogMessage = document.querySelector("#notion-status-dialog-message");
 const notionStatusCancel = document.querySelector("#notion-status-cancel");
 const enhancedSelects = new Map();
-let defaultAnalysisPrompt = "";
-let promptCustomized = false;
 let organizerData = null;
 let manualCandidateName = "";
 let topicOrganizerPreferences = {};
@@ -226,8 +221,6 @@ function settingsFromForm() {
     vertexModel: vertexModel.value.trim(),
     excludedPersonTerms: excludedPersonTerms.value,
     preferExistingTopics: preferExistingTopics.checked,
-    analysisPrompt: analysisPrompt.value,
-    analysisPromptCustomized: promptCustomized,
     outputSpec,
     requestTimeoutMinutes: Number(requestTimeout.value),
     notionTarget: notionTarget.value.trim(),
@@ -473,14 +466,6 @@ async function loadConfig() {
     rememberGeminiKey.checked = Boolean(config.rememberGeminiKey);
     rememberVertexKey.checked = Boolean(config.rememberVertexKey);
     excludedPersonTerms.value = (config.excludedPersonTerms ?? []).join("\n");
-    defaultAnalysisPrompt = config.defaultAnalysisPrompt || "";
-    analysisPrompt.value = config.analysisPrompt || defaultAnalysisPrompt;
-    promptCustomized = Boolean(config.analysisPromptCustomized);
-    promptState.textContent = promptCustomized
-      ? config.defaultPromptUpdated
-        ? "目前使用自訂提示詞；本版本的預設提示詞已更新，你的內容仍完整保留。"
-        : "目前使用自訂提示詞；版本更新時會保留。"
-      : "目前使用本版本預設提示詞。";
     const spec = config.outputSpec || DEFAULT_OUTPUT_SPEC;
     titleMax.value = spec.titleMax;
     topicMin.value = spec.topicMin;
@@ -642,7 +627,7 @@ clearButton.addEventListener("click", async () => {
 
 aiProvider.addEventListener("change", updateProviderUi);
 
-// ==== Prompt and output-spec editing ====
+// ==== Output-spec editing ====
 function currentOutputSpec() {
   return normalizeFormOutputSpec(false);
 }
@@ -673,33 +658,6 @@ document.querySelector("#reset-output-spec").addEventListener("click", () => {
   updateOutputSpecSummary();
   showStatus("輸出規格已恢復預設值；儲存後生效。", "info");
 });
-analysisPrompt.addEventListener("input", () => {
-  promptCustomized = analysisPrompt.value.trim() !== defaultAnalysisPrompt.trim();
-  promptState.textContent = promptCustomized ? "目前使用自訂提示詞；版本更新時會保留。" : "目前使用本版本預設提示詞。";
-});
-document.querySelector("#reset-prompt").addEventListener("click", () => {
-  analysisPrompt.value = defaultAnalysisPrompt;
-  promptCustomized = false;
-  promptState.textContent = "已恢復本版本預設提示詞；儲存後生效。";
-});
-document.querySelector("#copy-prompt").addEventListener("click", async () => {
-  await navigator.clipboard.writeText(analysisPrompt.value);
-  showStatus("提示詞已複製。", "success");
-});
-document.querySelector("#preview-prompt").addEventListener("click", async () => {
-  try {
-    const result = await send("GET_PROMPT_PREVIEW", {
-      prompt: analysisPrompt.value,
-      customized: promptCustomized,
-      outputSpec: currentOutputSpec()
-    });
-    promptPreview.textContent = result.prompt;
-    promptPreview.hidden = !promptPreview.hidden;
-  } catch (error) {
-    showStatus(error.message, "error");
-  }
-});
-
 // ==== Topic organizer rendering ====
 /**
  * Unclassified AI 暫定主題 pills. Clicking one sets manualCandidateName and

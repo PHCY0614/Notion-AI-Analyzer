@@ -159,12 +159,16 @@
         <p class="hint">狀態流程：待分析 → 分析中 → 已分析；尚未建立標準分類時為待主題整理，仍有無法對應項目時為待主題確認，失敗時為分析失敗。</p>
       </section>
 
-      <details class="panel" id="advanced-settings">
-        <summary><strong>4　進階分析設定</strong></summary>
-        <p class="hint">自訂內容會保留；JSON 欄位、資料邊界與安全規則由工具固定附加，避免提示文字改壞 Notion 寫回格式。</p>
-        <p><strong>輸出規格</strong></p>
+      <section class="panel" id="advanced-settings" aria-labelledby="advanced-heading">
+        <div class="section-heading">
+          <span class="step">4</span>
+          <div>
+            <h2 id="advanced-heading">進階分析設定</h2>
+            <p>調整分析結果的輸出規格與單次 AI 等待時間。</p>
+          </div>
+        </div>
         <p id="output-spec-summary" class="hint">目前分析規格：標題最多 12 字｜主題 1～3 個｜關鍵字 5 個｜摘要 100～250 字</p>
-        <p class="hint">可調範圍：標題上限 6～30 字｜主題最少與最多各 1～5 個｜關鍵字 3～10 個｜摘要最少 50～500 字、最多 100～800 字。超過範圍時會自動調回最接近的上限或下限。</p>
+        <p class="hint">可調範圍：標題上限 6～30 字｜主題最少與最多各 1～5 個｜關鍵字 3～10 個｜摘要最少 50～500 字、最多 100～800 字。</p>
         <div class="spec-grid">
           <label>標題上限（最高 30）<input id="title-max" type="number" min="6" max="30" value="12"></label>
           <label>主題最少（最高 5）<input id="topic-min" type="number" min="1" max="5" value="1"></label>
@@ -181,16 +185,7 @@
           <option value="10">10 分鐘</option>
           <option value="0">不限制</option>
         </select>
-        <label for="analysis-prompt">分析提示詞</label>
-        <textarea id="analysis-prompt" rows="18" spellcheck="false"></textarea>
-        <div class="inline-actions">
-          <button id="reset-prompt" class="button secondary compact" type="button">恢復預設提示詞</button>
-          <button id="copy-prompt" class="button secondary compact" type="button">複製提示詞</button>
-          <button id="preview-prompt" class="button secondary compact" type="button">查看實際提示詞</button>
-        </div>
-        <p id="prompt-state" class="hint"></p>
-        <pre id="prompt-preview" class="prompt-preview" hidden></pre>
-      </details>
+      </section>
 
       <section class="panel" id="topic-organizer-panel" aria-labelledby="organizer-heading">
         <div class="section-heading">

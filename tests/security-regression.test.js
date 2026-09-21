@@ -125,4 +125,5 @@ testOutputCap();
 testDiagnosticsExcludeContent();
 testBoundedPageSummaries();
 testRepositoryGuards();
+testAdvancedSettingsHidePromptControls();
 console.log("security regression tests passed");
