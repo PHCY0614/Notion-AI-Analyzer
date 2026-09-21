@@ -10,7 +10,7 @@ Traditional Chinese (Taiwan): [`PRIVACY.zh-TW.md`](PRIVACY.zh-TW.md)
 
 ## Chrome Web Store user-data commitment
 
-The use of information received from Google APIs will adhere to the [Chrome Web Store User Data Policy](https://developer.chrome.com/docs/webstore/program-policies/user-data-faq), including the Limited Use requirements. User data read, stored, or transmitted by the extension is used only to provide the Notion article analysis, topic organization, result write-back, and user-initiated queue features described below. It is not used for personalized advertising or credit assessment, is not sold, and is not transferred to third parties unrelated to these features.
+The use of information received from Google APIs will adhere to the [Chrome Web Store User Data Policy](https://developer.chrome.com/docs/webstore/program-policies/user-data-faq), including the Limited Use requirements. User data read, stored, or transmitted by the extension is used only to provide the Notion article analysis, topic organisation, result write-back, and user-initiated queue features described below. It is not used for personalised advertising or credit assessment, is not sold, and is not transferred to third parties unrelated to these features.
 
 ## Data this extension reads
 
@@ -18,10 +18,10 @@ This extension must be used with the Notion web app in Google Chrome. It uses th
 
 - Page ID, Notion URL, and the original page title, for the queue and recent/failed lists.
 - Plain-text blocks from the page, for article analysis.
-- `整理狀態`, to find pages in `待分析` or `分析失敗`. Topic organizing also queries `待主題整理` and `待主題確認`.
+- `整理狀態`, to find pages in `待分析` or `分析失敗`. Topic organising also queries `待主題整理` and `待主題確認`.
 - The data-source schema, to check required fields and to list existing confirmed AI topics (`AI 主題`) options.
-- When you click `載入可用資料庫` (“Load available databases”) in the options page, the extension uses the Notion Search API to read each authorized data source’s name, ID, parent database ID, and character emoji to build the picker. It does not retain the complete schema, description, cover, user data, or external image URLs from those results.
-- During batch topic organizing, the extension queries matching pages until it has at most 75 distinct provisional topics (`AI 暫定主題`), or there are no more matching pages. The organizer query asks Notion to return only the `整理狀態`, `AI 暫定主題`, and `AI 主題` database properties; Page ID is used only to write back to the correct page.
+- When you click `載入可用資料庫` (“Load available databases”) in the options page, the extension uses the Notion Search API to read each authorised data source’s name, ID, parent database ID, and character emoji to build the picker. It does not retain the complete schema, description, cover, user data, or external image URLs from those results.
+- During batch topic organising, the extension queries matching pages until it has at most 75 distinct provisional topics (`AI 暫定主題`), or there are no more matching pages. The organiser query asks Notion to return only the `整理狀態`, `AI 暫定主題`, and `AI 主題` database properties; Page ID is used only to write back to the correct page.
 - When the popup opens or you use 「分析目前頁面」, the Chrome-side tab access reads only the current tab’s Notion URL to identify the Page ID; it does not read other tabs or browsing history. It may then inspect that page and its data-source schema through the Notion API.
 
 Images, video, audio, files, and PDFs are not used as analysis input and are not sent to the AI provider.
@@ -40,7 +40,7 @@ Chrome permissions are `storage`, `alarms`, and `activeTab`. Host permissions ar
 
    Providers you did not select do not receive the article. Listing models and testing the connection send the key to the currently selected provider. The Vertex test also sends the fixed string `連線測試` and does not include a Notion page.
 3. Returned JSON is checked locally for shape, length, and counts. Article-analysis requests do not include existing confirmed AI topics (`AI 主題`) or the local topic dictionary, and the analysis step does not select confirmed `AI 主題`. Batch analysis does not write `AI 主題`. Single-page reanalysis clears confirmed AI topics and then enters the topic-confirmation flow.
-4. Batch topic organizing sends only this batch’s distinct provisional topic (`AI 暫定主題`) names and optional existing confirmed AI topic (`AI 主題`) names. Page body, page title, AI title, summary, keywords, occurrence counts, co-occurrence, and impact counts are not sent for classification.
+4. Batch topic organising sends only this batch’s distinct provisional topic (`AI 暫定主題`) names and optional existing confirmed AI topic (`AI 主題`) names. Page body, page title, AI title, summary, keywords, occurrence counts, co-occurrence, and impact counts are not sent for classification.
 5. Accepted results are written back to `api.notion.com`. During a connection test, if the `整理狀態` Select property or the `待分析` option is missing, the settings page asks for confirmation first. The extension creates that property or completes the required workflow options only after the user chooses `新增並繼續` (“Add and continue”). It does not convert an existing property to another type, delete user-created options, or rename them. After that preparation, testing the connection, scanning, starting a queue, or opening the popup on a Notion page may PATCH other missing AI properties and remaining workflow options.
 
 The extension developer does not operate a separate intermediary server and the extension has no analytics or telemetry. Google AI Studio and Vertex AI handling depends on the project, plan, and Google’s current terms.
@@ -55,7 +55,7 @@ Chrome extension storage holds:
 
 - General settings: Notion target ID, AI provider and model names, keyword-exclusion terms, analysis prompt and output spec, global and per-page topic mappings, and whether to remember keys.
 - Run state: latest scanned pending page IDs, the local batch queue, recent results, errors, and pause state. After a successful rescan, the queue is cleared or synced to Notion’s current `待分析` set so stale items are not kept as work.
-- Topic dictionary and organizer session: standard topics, definitions, aliases, colors, enabled flags, permanently discarded provisional topic names, the current suggestion batch, unclassified / temporarily skipped items, and the last apply snapshot used for rollback. Dictionary export does not include keys, tokens, or article text.
+- Topic dictionary and organiser session: standard topics, definitions, aliases, colours, enabled flags, permanently discarded provisional topic names, the current suggestion batch, unclassified / temporarily skipped items, and the last apply snapshot used for rollback. Dictionary export does not include keys, tokens, or article text.
 - Failure diagnostics: only on AI output failure, provider, model name, stop reason, numeric token usage, safety categories, output character count, and validation error count. The diagnostic field does not persist raw AI responses or validation-error text; a separate short user-facing failure message is retained for retry and troubleshooting.
 - Keys: the Notion token and the two AI keys each have a separate “remember” option. They are kept in session storage by default; they are stored in local extension storage only if you explicitly choose to remember them.
 
@@ -72,7 +72,7 @@ Successful recent rows store page ID, title, URL, status, and time. Failed rows 
 - It does not put keys in URLs, source, ZIP files, analysis logs, or Notion.
 - It does not change Notion’s original `名稱` or page body.
 - It does not delete database properties or status options you added.
-- It does not run a scheduled auto-scan of the database. Opening the popup may query Notion to identify the current page; database scans, article analysis, and topic organizing start only after explicit user actions. `alarms` is used only to continue a queue you already started.
+- It does not run a scheduled auto-scan of the database. Opening the popup may query Notion to identify the current page; database scans, article analysis, and topic organising start only after explicit user actions. `alarms` is used only to continue a queue you already started.
 
 ## Your responsibilities
 

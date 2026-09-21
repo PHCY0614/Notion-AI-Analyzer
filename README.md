@@ -2,13 +2,15 @@
 
 **AI Content Organiser for Notion**
 
-> Let AI handle the first pass while you keep the final say over how your knowledge base is organized.
+*Product UI and AI output are currently in Traditional Mandarin (Taiwan); an English UI is planned later.*
 
-Siftly is a Chrome extension that helps you organize articles stored in Notion. It analyzes the plain text of a page, generates a Traditional Chinese title, summary, keywords, and provisional topics, and writes the results back to Notion.
+> Let AI handle the first pass while you keep the final say over how your knowledge base is organised.
+
+Siftly is a Chrome extension that helps you organise articles stored in Notion. It analyses the plain text of a page, generates a Traditional Chinese title, summary, keywords, and provisional topics, and writes the results back to Notion.
 
 正體中文（臺灣）: [`README.zh-TW.md`](README.zh-TW.md)
 
-The user interface is written in Traditional Chinese and localized for users in Taiwan. The source code and developer documentation are maintained primarily in English.
+The user interface is written in Traditional Chinese and localised for users in Taiwan. The source code and developer documentation are maintained primarily in English.
 
 ## Requirements
 
@@ -17,33 +19,33 @@ The user interface is written in Traditional Chinese and localized for users in 
 - A Notion Integration Token with access to that database
 - An API key for Google AI Studio or Vertex AI
 
-The extension is configured for a specific Notion database and analyzes pages that belong to that database. It must be used with the Notion web app in Chrome and does not operate directly in the Notion desktop or mobile apps.
+The extension is configured for a specific Notion database and analyses pages that belong to that database. It must be used with the Notion web app in Chrome and does not operate directly in the Notion desktop or mobile apps.
 
 ## Why This Tool Exists
 
-Saving an article to Notion is easy. Naming it, summarizing it, adding useful keywords, and keeping its topics organized over time takes much more work. As a collection grows, doing all of this manually becomes time-consuming and difficult to keep consistent.
+Saving an article to Notion is easy. Naming it, summarising it, adding useful keywords, and keeping its topics organised over time takes much more work. As a collection grows, doing all of this manually becomes time-consuming and difficult to keep consistent.
 
 Giving an AI complete control over the final taxonomy creates a different problem: duplicate labels, overly narrow categories, and topic names that do not match the way you use your knowledge base.
 
-This extension therefore separates the workflow into two stages. AI first analyzes each article and produces provisional results. You then review its organization suggestions and decide which final topics to use. AI reduces repetitive work without taking control of your taxonomy.
+This extension therefore separates the workflow into two stages. AI first analyses each article and produces provisional results. You then review its organisation suggestions and decide which final topics to use. AI reduces repetitive work without taking control of your taxonomy.
 
 ## What You Can Use It For
 
-Siftly is suitable for organizing:
+Siftly is suitable for organising:
 
 - Saved articles and read-later collections
 - Reading notes and research material
 - Social posts and personal records
-- Any growing collection of text that needs consistent search and categorization
+- Any growing collection of text that needs consistent search and categorisation
 
 The extension reads plain text from pages in a selected Notion database, sends it to the AI service you choose, and writes the structured results back to the same database.
 
 ## Workflow
 
 1. Mark the Notion pages you want to process as `待分析` (Pending Analysis).
-2. Analyze the current page, or scan the database and start a batch.
+2. Analyse the current page, or scan the database and start a batch.
 3. Write the generated title, summary, keywords, and provisional topics back to Notion.
-4. Scan the accumulated provisional topics and generate organization suggestions.
+4. Scan the accumulated provisional topics and generate organisation suggestions.
 5. Review, edit, or discard the suggestions to complete the final taxonomy.
 
 ## Installation
@@ -57,7 +59,7 @@ This extension is not currently available on the Chrome Web Store and must be in
 5. Click **Load unpacked**.
 6. Select the extracted folder that contains `manifest.json`.
 7. Create a Notion Internal Integration, then use `Add connections` in the target database to share it with that Integration.
-8. Open the extension settings, paste the Notion Integration Token, click `載入可用資料庫` (“Load available databases”), choose one active data source from the authorized list, and enter the API key for your selected AI provider.
+8. Open the extension settings, paste the Notion Integration Token, click `載入可用資料庫` (“Load available databases”), choose one active data source from the authorised list, and enter the API key for your selected AI provider.
 9. Save the settings, then click `測試連線並準備欄位` (“Test connections and prepare properties”) to complete the connection and database property setup. If the database lacks the `整理狀態` Select property or the `待分析` option, the extension asks for confirmation first. It creates the property or completes the workflow options only after you choose `新增並繼續` (“Add and continue”).
 
 The list contains only data sources shared with that Integration, and only one database can be active at a time. If Notion Search has not indexed a database yet, the list exceeds the load limit, or the target is otherwise absent, expand the advanced settings and enter a database URL or Data Source ID manually.
@@ -66,9 +68,9 @@ Versions installed manually from GitHub do not update automatically. After downl
 
 ## Features
 
-### Analyze the Current Page or Run a Batch
+### Analyse the Current Page or Run a Batch
 
-On an individual Notion page, you can analyze the page currently open in the browser. On a database page, you can scan pages marked `待分析` and process them as a batch.
+On an individual Notion page, you can analyse the page currently open in the browser. On a database page, you can scan pages marked `待分析` and process them as a batch.
 
 While a batch is running, the popup shows the number of pending pages, items in the local queue, and failed analyses. You can stop or resume the batch and retry failed items. Moving between Notion pages does not interrupt an active queue.
 
@@ -95,7 +97,7 @@ The results are written to their corresponding Notion properties, making a datab
 
 ### Consolidate Duplicate or Related Topics
 
-As a collection grows, AI may produce provisional topics with similar meanings but different names. Topic organization reads the accumulated candidates and suggests a more consistent set of reusable categories.
+As a collection grows, AI may produce provisional topics with similar meanings but different names. Topic organisation reads the accumulated candidates and suggests a more consistent set of reusable categories.
 
 Each suggestion shows:
 
@@ -104,13 +106,13 @@ Each suggestion shows:
 - The reason for the suggestion and its confidence level
 - The number of pages that would be affected
 
-If your database already has a stable taxonomy, you can ask the organizer to prefer existing topics and avoid creating unnecessary new categories. Topic organization uses only the organization status, provisional topics, and existing confirmed topics. It does not resend article bodies, summaries, or keywords.
+If your database already has a stable taxonomy, you can ask the organiser to prefer existing topics and avoid creating unnecessary new categories. Topic organisation uses only the organisation status, provisional topics, and existing confirmed topics. It does not resend article bodies, summaries, or keywords.
 
-![AI-generated topic organization suggestions](docs/images/topic-suggestions.png)
+![AI-generated topic organisation suggestions](docs/images/topic-suggestions.png)
 
 ### Keep Final Classification Under Human Control
 
-No organization suggestion is applied until you confirm it. For each suggestion or unclassified topic, you can:
+No organisation suggestion is applied until you confirm it. For each suggestion or unclassified topic, you can:
 
 - Create the proposed final topic
 - Map it to an existing Notion topic
