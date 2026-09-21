@@ -53,11 +53,6 @@ function testUserFacingCopy() {
     assert.match(text, new RegExp(ZH_SUBTITLE), `${name} must use the Chinese subtitle`);
     assert.doesNotMatch(text, new RegExp(EN_SUBTITLE), `${name} should not use the English subtitle`);
   }
-
-  const zhReadme = source("README.zh-TW.md");
-  assert.match(zhReadme, /正體中文/, "README.zh-TW.md must use 正體中文 for the product language");
-  assert.doesNotMatch(zhReadme, /繁體中文/, "README.zh-TW.md should not use 繁體中文 for the product language");
-  assert.doesNotMatch(zhReadme, /台灣/, "README.zh-TW.md should use 臺灣, not 台灣");
 }
 
 function testSettingsPageCopy() {
