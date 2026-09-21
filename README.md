@@ -187,4 +187,4 @@ The extension does not use a developer-operated relay server and does not includ
 
 Article text is sent directly from Notion to the AI provider you select. Providers that are not selected do not receive the content. Images, video, audio, files, and PDFs are not included as article analysis content.
 
-For the complete data flow, see [`PRIVACY.md`](PRIVACY.md) ([Traditional Chinese](PRIVACY.zh-TW.md)).
+For the complete data flow, see [`PRIVACY.md`](PRIVACY.md) ([正體中文(臺灣)](PRIVACY.zh-TW.md)).
