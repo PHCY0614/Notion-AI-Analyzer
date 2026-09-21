@@ -5,16 +5,17 @@
 // ==== AI model discovery and connection diagnostics ====
 function recommendedVertexModels() {
   return [
+    { name: "gemini-3.5-flash-lite", displayName: "Gemini 3.5 Flash-Lite", inputTokenLimit: null, outputTokenLimit: null },
+    { name: "gemini-3.1-flash-lite", displayName: "Gemini 3.1 Flash-Lite", inputTokenLimit: null, outputTokenLimit: null },
+    { name: "gemini-2.5-flash-lite", displayName: "Gemini 2.5 Flash-Lite", inputTokenLimit: null, outputTokenLimit: null },
+    { name: "gemini-3.8-flash", displayName: "Gemini 3.8 Flash", inputTokenLimit: null, outputTokenLimit: null },
     { name: "gemini-3.7-flash", displayName: "Gemini 3.7 Flash", inputTokenLimit: null, outputTokenLimit: null },
     { name: "gemini-3.6-flash", displayName: "Gemini 3.6 Flash", inputTokenLimit: null, outputTokenLimit: null },
-    { name: "gemini-3.5-flash-lite", displayName: "Gemini 3.5 Flash-Lite", inputTokenLimit: null, outputTokenLimit: null },
     { name: "gemini-3.5-flash", displayName: "Gemini 3.5 Flash", inputTokenLimit: null, outputTokenLimit: null },
-    { name: "gemini-3.1-flash-lite", displayName: "Gemini 3.1 Flash-Lite", inputTokenLimit: null, outputTokenLimit: null },
-    { name: "gemini-3.1-pro-preview", displayName: "Gemini 3.1 Pro Preview", inputTokenLimit: null, outputTokenLimit: null },
-    { name: "gemini-3-flash-preview", displayName: "Gemini 3 Flash Preview", inputTokenLimit: null, outputTokenLimit: null },
-    { name: "gemini-2.5-flash-lite", displayName: "Gemini 2.5 Flash-Lite", inputTokenLimit: null, outputTokenLimit: null },
     { name: "gemini-2.5-flash", displayName: "Gemini 2.5 Flash", inputTokenLimit: null, outputTokenLimit: null },
-    { name: "gemini-2.5-pro", displayName: "Gemini 2.5 Pro", inputTokenLimit: null, outputTokenLimit: null }
+    { name: "gemini-2.5-pro", displayName: "Gemini 2.5 Pro", inputTokenLimit: null, outputTokenLimit: null },
+    { name: "gemini-3.1-pro-preview", displayName: "Gemini 3.1 Pro Preview", inputTokenLimit: null, outputTokenLimit: null },
+    { name: "gemini-3-flash-preview", displayName: "Gemini 3 Flash Preview", inputTokenLimit: null, outputTokenLimit: null }
   ];
 }
 
@@ -332,7 +333,7 @@ function resolveProviderSelection(settings, current) {
   }
   const aiProvider = requestedProvider;
   const geminiModel = S.normalizeModelName(settings.geminiModel ?? current.geminiModel) || G.DEFAULT_MODEL;
-  const vertexModel = S.normalizeModelName(settings.vertexModel ?? current.vertexModel) || "gemini-3.5-flash-lite";
+  const vertexModel = S.normalizeModelName(settings.vertexModel ?? current.vertexModel) || G.DEFAULT_MODEL;
   return {
     aiProvider,
     geminiModel,
@@ -342,6 +343,9 @@ function resolveProviderSelection(settings, current) {
 
 function resolvePromptSettings(settings, current) {
   const outputSpec = P.normalizeOutputSpec(settings.outputSpec ?? current.outputSpec);
+  // Custom-prompt UI is gone; keep any previously stored customization so
+  // analysis still honours it. Incoming SAVE_SETTINGS from the options page
+  // omits these keys, so they persist unchanged.
   const analysisPrompt = settings.analysisPrompt === undefined
     ? S.cleanText(current.analysisPrompt)
     : String(settings.analysisPrompt ?? "").trim().slice(0, 30000);
@@ -533,10 +537,11 @@ async function saveSettings(settings) {
 /**
  * Options/popup config payload. Reads stored config and whether secrets exist.
  * Does not return Notion token or AI key values; exposes hasNotionToken and
- * has*Key booleans. Spreads ids, models, prompt flags, topic dictionary,
+ * has*Key booleans. Spreads ids, models, topic dictionary,
  * discardedTopicNames, and preferExistingTopicsByDataSource, and adds
- * preferExistingTopics for the current data source, prompt preview, and
- * default-prompt drift. Does not call Notion or AI.
+ * preferExistingTopics for the current data source. Custom analysis-prompt
+ * fields stay in storage for analysis but are not exposed to the UI.
+ * Does not call Notion or AI.
  */
 async function getConfigForUi() {
   const config = await readConfig();
@@ -546,20 +551,15 @@ async function getConfigForUi() {
     readSecret(VERTEX_KEY_KEY)
   ]);
   const aiProvider = normalizeAiProvider(config.aiProvider);
+  const publicConfig = { ...config };
+  delete publicConfig.analysisPrompt;
+  delete publicConfig.analysisPromptCustomized;
+  delete publicConfig.promptBaseVersion;
   return {
-    ...config,
+    ...publicConfig,
     preferExistingTopics: topicOrganizerPreference(config),
     aiProvider,
     activeModel: aiProvider === "vertex" ? config.vertexModel : config.geminiModel,
-    analysisPrompt: config.analysisPromptCustomized ? config.analysisPrompt : P.DEFAULT_ANALYSIS_PROMPT,
-    analysisPromptCustomized: Boolean(config.analysisPromptCustomized),
-    defaultAnalysisPrompt: P.DEFAULT_ANALYSIS_PROMPT,
-    defaultPromptUpdated: Boolean(config.analysisPromptCustomized)
-      && config.promptBaseVersion !== CURRENT_PROMPT_VERSION,
-    finalPromptPreview: P.buildSystemPrompt(
-      config.analysisPromptCustomized ? config.analysisPrompt : "",
-      config.outputSpec
-    ),
     excludedPersonTerms: normalizeExcludedPersonTerms(config.excludedPersonTerms),
     hasAiKey: aiProvider === "vertex" ? Boolean(vertexKey) : Boolean(geminiKey),
     hasGeminiKey: Boolean(geminiKey),

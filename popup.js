@@ -48,6 +48,8 @@ const buttons = {
   skipTopic: document.querySelector("#skip-topic")
 };
 const organizeTopicsButton = document.querySelector("#organize-topics");
+const reanalyzeHint = document.querySelector("#reanalyze-hint");
+const REANALYZE_CONFIRM_MESSAGE = "重新分析會重新產生 AI 分析結果，並清除既有已確認的 AI 主題；之後需要重新確認主題。確定繼續嗎？";
 let configured = false;
 let actionBusy = false;
 let renderedReviewKey = "";
@@ -68,6 +70,15 @@ function currentPageAction(info) {
   if (info.status === "待主題確認") return { action: "review", label: "繼續確認主題" };
   if (info.status === "已分析" || info.analyzed) return { action: "reanalyze", label: "重新分析" };
   return { action: "analyze", label: "分析目前頁面" };
+}
+
+/**
+ * Shared wording for every popup path that sends REANALYZE_PAGE with force.
+ * Confirmed AI 主題 is cleared when the new analysis is written; 暫定主題
+ * are regenerated and need confirmation again.
+ */
+function confirmDestructiveReanalysis() {
+  return window.confirm(REANALYZE_CONFIRM_MESSAGE);
 }
 
 // ==== Background messaging ====
@@ -214,8 +225,9 @@ function renderRecent(items) {
     reanalyze.type = "button";
     reanalyze.textContent = item.outcome === "failed" ? "重試" : "重新分析";
     reanalyze.addEventListener("click", () => {
-      if (item.outcome !== "failed" && !confirm("重新分析會重新產生 AI 分析結果；既有 AI 主題將被清除，之後需要重新確認主題。確定繼續嗎？")) return;
-      void runAction("REANALYZE_PAGE", { pageId: item.id, force: item.outcome !== "failed" });
+      const force = item.outcome !== "failed";
+      if (force && !confirmDestructiveReanalysis()) return;
+      void runAction("REANALYZE_PAGE", { pageId: item.id, force });
     });
 
     const rowActions = document.createElement("div");
@@ -414,6 +426,7 @@ function renderStatus(state) {
   buttons.current.textContent = singleActive
     ? "停止分析"
     : pageAction.label;
+  reanalyzeHint.hidden = !(singlePage && !singleActive && currentAction === "reanalyze");
 }
 
 // ==== Current-page inspection ====
@@ -500,11 +513,13 @@ buttons.current.addEventListener("click", () => {
     void runAction("REVIEW_CURRENT_PAGE_TOPICS", { pageId: currentPageInfo.id });
     return;
   }
-  if (currentAction === "reanalyze"
-    && !confirm("重新分析會重新產生 AI 分析結果；既有 AI 主題將被清除，之後需要重新確認主題。確定繼續嗎？")) return;
+  const force = currentAction === "reanalyze"
+    || currentAction === "retry"
+    || Boolean(currentPageInfo.analyzed);
+  if (force && !confirmDestructiveReanalysis()) return;
   void runAction("REANALYZE_PAGE", {
     pageId: currentPageInfo.id,
-    force: currentAction === "reanalyze" || currentAction === "retry" || currentPageInfo.analyzed
+    force
   });
 });
 buttons.all.addEventListener("click", () => runAction("ANALYZE_ALL"));

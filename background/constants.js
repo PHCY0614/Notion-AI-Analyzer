@@ -69,7 +69,7 @@ const DEFAULT_CONFIG = Object.freeze({
   discardedTopicNames: [],
   excludedPersonTerms: DEFAULT_EXCLUDED_PERSON_TERMS,
   geminiModel: G.DEFAULT_MODEL,
-  vertexModel: "gemini-3.5-flash-lite",
+  vertexModel: G.DEFAULT_MODEL,
   notionTarget: "",
   rememberGeminiKey: false,
   rememberVertexKey: false,

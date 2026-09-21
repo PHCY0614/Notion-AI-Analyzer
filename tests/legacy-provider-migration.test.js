@@ -64,6 +64,7 @@ const context = vm.createContext({
       onAlarm: { addListener() {} }
     },
     runtime: {
+      id: "siftly-test-extension",
       onInstalled: { addListener() {} },
       onMessage: { addListener(listener) { messageListener = listener; } },
       onStartup: { addListener() {} },
@@ -83,8 +84,8 @@ context.importScripts = (...names) => {
   }
 };
 
-function send(message) {
-  return new Promise(resolve => messageListener(message, {}, resolve));
+function send(message, sender = { id: context.chrome.runtime.id }) {
+  return new Promise(resolve => messageListener(message, sender, resolve));
 }
 
 async function main() {

@@ -266,6 +266,12 @@ button { font: inherit; }
 
 .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 13px; }
 .actions .wide-action { grid-column: 1 / -1; }
+.reanalyze-hint {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
 #retry { grid-column: 2; }
 .button {
   min-height: 39px;
