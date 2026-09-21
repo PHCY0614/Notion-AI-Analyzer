@@ -4,7 +4,7 @@
 
 開發與維護：Penny Hsieh
 
-本政策適用於透過 Chrome Web Store 或本專案 GitHub 提供的版本。
+本政策適用於透過 Chrome Web Store 或本專案 GitHub 提供的 **Siftly**（Notion x AI 內容整理工具）版本。
 
 英文版：[`PRIVACY.md`](PRIVACY.md)
 

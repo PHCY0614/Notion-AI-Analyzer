@@ -4,7 +4,7 @@ Last updated: September 20, 2026
 
 Developed and maintained by Penny Hsieh.
 
-This policy applies to versions distributed through the Chrome Web Store or this project's GitHub repository.
+This policy applies to **Siftly**, an AI Content Organiser for Notion, in versions distributed through the Chrome Web Store or this project's GitHub repository.
 
 Traditional Chinese (Taiwan): [`PRIVACY.zh-TW.md`](PRIVACY.zh-TW.md)
 
