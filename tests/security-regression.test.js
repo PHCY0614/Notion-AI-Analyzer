@@ -13,6 +13,15 @@ function source(name) {
   return fs.readFileSync(path.join(root, name), "utf8");
 }
 
+function importedScripts(entry = "background.js") {
+  const match = source(entry).match(/importScripts\(([\s\S]*?)\)/);
+  return match ? [...match[1].matchAll(/"([^"]+\.js)"/g)].map(item => item[1]) : [];
+}
+
+function serviceWorkerSource() {
+  return [source("background.js"), ...importedScripts().map(source)].join("\n");
+}
+
 function testOutputCap() {
   const payloads = [
     G.buildAnalysisRequest("article"),
@@ -78,7 +87,7 @@ function testBoundedPageSummaries() {
 }
 
 function testRepositoryGuards() {
-  const background = source("background.js");
+  const background = serviceWorkerSource();
   assert.match(background, /MAX_ARTICLE_CHARACTERS = 120000/);
   assert.match(background, /assertArticleSize\(articleText\)/);
   assert.match(background, /MAX_INPUT_TOKENS = 350000/);

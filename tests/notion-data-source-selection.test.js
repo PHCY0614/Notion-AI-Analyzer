@@ -549,15 +549,16 @@ async function testConfirmedStatusFieldPreparation() {
 }
 
 function testRepositoryGuards() {
-  const background = source("background.js");
-  const listFunction = background.slice(
-    background.indexOf("async function listNotionDataSources"),
-    background.indexOf("// ==== AI transport ====")
+  const transport = source("background/transport.js");
+  const listFunction = transport.slice(
+    transport.indexOf("async function listNotionDataSources"),
+    transport.indexOf("// ==== AI transport ====")
   );
   assert.doesNotMatch(listFunction, /writeConfig|persistState|storeSecret|ensureSchema/);
   assert.match(listFunction, /MAX_NOTION_DATA_SOURCES/);
-  assert.match(background, /case "LIST_NOTION_DATA_SOURCES"/);
-  assert.match(background, /case "PREPARE_NOTION_STATUS_FIELD"/);
+  const messages = source("background/messages.js");
+  assert.match(messages, /case "LIST_NOTION_DATA_SOURCES"/);
+  assert.match(messages, /case "PREPARE_NOTION_STATUS_FIELD"/);
 
   const options = source("options.js");
   const loadConfig = options.slice(options.indexOf("async function loadConfig"), options.indexOf("function compactTargetId"));
