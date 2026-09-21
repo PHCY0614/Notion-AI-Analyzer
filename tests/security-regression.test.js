@@ -20,6 +20,10 @@ function testOutputCap() {
     G.buildChunkRequest("chunk", 1, 1),
     G.buildChunkRepairRequest("bad", ["error"]),
     G.buildTopicOrganizerRequest(["主題一"]),
+    G.buildTopicStandardMatcherRequest(
+      [{ group_id: "group_1", proposed_topic: "主題一", source_topics: ["來源一", "來源二"] }],
+      [{ name: "既有主題" }]
+    ),
     G.generationPayload("system", "user", {}, { maxOutputTokens: 999999 })
   ];
   assert.equal(G.MAX_OUTPUT_TOKENS, 8192);
@@ -102,7 +106,19 @@ function testRepositoryGuards() {
 
   const normalizedPrompt = source("prompt.js").replace(/\r\n/g, "\n");
   const promptHash = crypto.createHash("sha256").update(normalizedPrompt).digest("hex").toUpperCase();
-  assert.equal(promptHash, "2AA4F182FE861E529B200C9F71545E022D2C33C1FBA4A081DE6F3943A4EF11D9");
+  assert.equal(promptHash, "22C652000655892B43B3F7FD5F4E01AB170AAD44B660FC53FD592479E593CF50");
+}
+
+function testAdvancedSettingsHidePromptControls() {
+  const html = source("options.html");
+  const options = source("options.js");
+  assert.match(html, /<section class="panel" id="advanced-settings" aria-labelledby="advanced-heading">/);
+  assert.match(html, /<span class="step">4<\/span>[\s\S]*<h2 id="advanced-heading">進階分析設定<\/h2>/);
+  assert.match(html, /id="reset-output-spec"/);
+  for (const id of ["analysis-prompt", "reset-prompt", "copy-prompt", "preview-prompt", "prompt-state", "prompt-preview"]) {
+    assert.doesNotMatch(html, new RegExp(`id="${id}"`));
+  }
+  assert.doesNotMatch(options, /analysisPrompt|promptCustomized|GET_PROMPT_PREVIEW/);
 }
 
 testOutputCap();

@@ -1406,15 +1406,15 @@ function canRetryTopicOrganizerWithoutSchema(error) {
 }
 
 /**
- * Asks the AI provider to group unconfirmed AI 暫定主題 into standard-topic
- * suggestions. Tries a strict JSON-schema request first; on a schema/parameter
+ * Asks the AI provider to group unconfirmed AI 暫定主題 without exposing the
+ * existing confirmed taxonomy. Tries a strict JSON-schema request first; on a schema/parameter
  * failure it retries in compatibility JSON mode; if the payload still fails
  * validation it sends one repair request (at most three AI calls). Does not
  * read or write Notion. On a second invalid payload it locally treats every
  * candidate as unclassified instead of calling AI again. Updates stage via
  * setStage; does not mutate the queue.
  */
-async function requestOrganizerGroups({ aiCandidates, standards, config, controller, promptOptions }) {
+async function requestOrganizerGroups({ aiCandidates, config, controller }) {
   const { apiKey, model, provider } = await activeAiContext(config);
   const aiInput = aiCandidates.map(candidate => ({ name: candidate.name }));
   const candidateNames = aiCandidates.map(candidate => candidate.name);
@@ -1424,7 +1424,7 @@ async function requestOrganizerGroups({ aiCandidates, standards, config, control
     response = await timedAiRequest(
       provider,
       model,
-      G.buildTopicOrganizerRequest(aiInput, standards, model, promptOptions),
+      G.buildTopicOrganizerRequest(aiInput, [], model),
       { apiKey, signal: controller.signal, timeoutMinutes: config.requestTimeoutMinutes }
     );
   } catch (error) {
@@ -1433,24 +1433,24 @@ async function requestOrganizerGroups({ aiCandidates, standards, config, control
     response = await timedAiRequest(
       provider,
       model,
-      G.buildTopicOrganizerCompatibilityRequest(aiInput, standards, model, promptOptions),
+      G.buildTopicOrganizerCompatibilityRequest(aiInput, [], model),
       { apiKey, signal: controller.signal, timeoutMinutes: config.requestTimeoutMinutes }
     );
   }
-  await setStage("驗證主題建議", { model, provider });
+  await setStage("驗證暫定主題分組", { model, provider });
   let invalidRaw = "";
   let checked;
   try {
     const parsed = G.parseJsonCandidate(response);
     invalidRaw = parsed.raw;
-    checked = G.validateTopicOrganizer(parsed.value, candidateNames, standards);
+    checked = G.validateTopicOrganizer(parsed.value, candidateNames, []);
   } catch (error) {
     if (error?.nonRetryable) throw error;
     invalidRaw = error?.rawOutput || "";
     checked = { ok: false, errors: [error?.message || "AI 回傳的內容不是有效 JSON"] };
   }
   if (!checked.ok) {
-    await setStage("修復主題建議格式", { model, provider });
+    await setStage("修復暫定主題分組格式", { model, provider });
     const repairedResponse = await timedAiRequest(
       provider,
       model,
@@ -1458,29 +1458,126 @@ async function requestOrganizerGroups({ aiCandidates, standards, config, control
         invalidRaw,
         checked.errors,
         candidateNames,
-        standards,
-        model,
-        promptOptions
+        [],
+        model
       ),
       { apiKey, signal: controller.signal, timeoutMinutes: config.requestTimeoutMinutes }
     );
     let repaired;
     try {
       repaired = G.parseJsonCandidate(repairedResponse);
-      checked = G.validateTopicOrganizer(repaired.value, candidateNames, standards);
+      checked = G.validateTopicOrganizer(repaired.value, candidateNames, []);
     } catch (error) {
       if (error?.nonRetryable) throw error;
       checked = { ok: false, errors: [error?.message || "修復結果不是有效 JSON"] };
     }
     if (!checked.ok) {
       warnings.push(`模型兩次都未回傳可用格式，本批候選已全部保留未分類：${checked.errors.join("；")}`);
-      checked = G.validateTopicOrganizer({ groups: [], unclassified_topics: candidateNames }, candidateNames, standards);
+      checked = G.validateTopicOrganizer({ groups: [], unclassified_topics: candidateNames }, candidateNames, []);
     }
   }
   warnings.push(...(checked.warnings ?? []));
   return {
     groups: checked.value.groups,
     unclassifiedTopics: checked.value.unclassified_topics,
+    warnings
+  };
+}
+
+/**
+ * Compares already-validated provisional groups with existing AI 主題. This
+ * stage may replace only standard_topic; it cannot alter group membership.
+ * Invalid decisions safely keep the first-stage proposed name.
+ */
+async function requestTopicStandardMatches({ groups, standards, config, controller, promptOptions }) {
+  if (!groups.length || !standards.length) return { groups, warnings: [] };
+  const { apiKey, model, provider } = await activeAiContext(config);
+  const matcherGroups = groups.map((group, index) => ({
+    group_id: `group_${index + 1}`,
+    proposed_topic: group.standard_topic,
+    source_topics: group.source_topics,
+    definition: group.definition
+  }));
+  const warnings = [];
+  let response;
+  await setStage("比對既有 AI 主題", { model, provider });
+  try {
+    response = await timedAiRequest(
+      provider,
+      model,
+      G.buildTopicStandardMatcherRequest(matcherGroups, standards, model, promptOptions),
+      { apiKey, signal: controller.signal, timeoutMinutes: config.requestTimeoutMinutes }
+    );
+  } catch (error) {
+    if (!canRetryTopicOrganizerWithoutSchema(error)) throw error;
+    await setStage("既有主題比對改用相容 JSON 模式", { model, provider });
+    response = await timedAiRequest(
+      provider,
+      model,
+      G.buildTopicStandardMatcherCompatibilityRequest(matcherGroups, standards, model, promptOptions),
+      { apiKey, signal: controller.signal, timeoutMinutes: config.requestTimeoutMinutes }
+    );
+  }
+  await setStage("驗證既有主題比對", { model, provider });
+  let invalidRaw = "";
+  let checked;
+  try {
+    const parsed = G.parseJsonCandidate(response);
+    invalidRaw = parsed.raw;
+    checked = G.validateTopicStandardMatches(parsed.value, matcherGroups, standards);
+  } catch (error) {
+    if (error?.nonRetryable) throw error;
+    invalidRaw = error?.rawOutput || "";
+    checked = { ok: false, errors: [error?.message || "AI 回傳的內容不是有效 JSON"] };
+  }
+  if (!checked.ok) {
+    await setStage("修復既有主題比對格式", { model, provider });
+    const repairedResponse = await timedAiRequest(
+      provider,
+      model,
+      G.buildTopicStandardMatcherRepairRequest(
+        invalidRaw,
+        checked.errors,
+        matcherGroups,
+        standards,
+        model,
+        promptOptions
+      ),
+      { apiKey, signal: controller.signal, timeoutMinutes: config.requestTimeoutMinutes }
+    );
+    try {
+      const repaired = G.parseJsonCandidate(repairedResponse);
+      checked = G.validateTopicStandardMatches(repaired.value, matcherGroups, standards);
+    } catch (error) {
+      if (error?.nonRetryable) throw error;
+      checked = { ok: false, errors: [error?.message || "修復結果不是有效 JSON"] };
+    }
+    if (!checked.ok) {
+      warnings.push(`既有主題比對兩次都未回傳可用格式，已保留第一階段建議名稱：${checked.errors.join("；")}`);
+      checked = G.validateTopicStandardMatches({ matches: [] }, matcherGroups, standards);
+    }
+  }
+  warnings.push(...(checked.warnings ?? []));
+  const matchById = new Map(checked.value.matches.map(match => [match.group_id, match]));
+  const confidenceRank = { low: 0, medium: 1, high: 2 };
+  const confidenceName = ["low", "medium", "high"];
+  return {
+    groups: groups.map((group, index) => {
+      const match = matchById.get(`group_${index + 1}`);
+      if (!match) return group;
+      const matchedExisting = match.decision === "reuse_existing";
+      const confidence = confidenceName[Math.min(
+        confidenceRank[group.confidence] ?? 0,
+        confidenceRank[match.confidence] ?? 0
+      )];
+      return {
+        ...group,
+        standard_topic: matchedExisting ? match.matched_topic : group.standard_topic,
+        reason: uniqueTopicNames([group.reason, `既有主題比對：${match.reason}`]).join("；").slice(0, 500),
+        confidence,
+        existing: matchedExisting
+      };
+    }),
     warnings
   };
 }
@@ -1516,7 +1613,8 @@ function buildOrganizerReviewGroups(groups, candidates) {
  * readyNotion). Does not write AI 暫定主題 or AI 主題 on article pages.
  * Candidates already mapped by existing options, page resolutions, or the
  * confirmed dictionary skip AI and become confirmed groups. Remaining names
- * go through requestOrganizerGroups. Stores the session in topicOrganizer.
+ * are first grouped independently, then those fixed groups are compared with
+ * existing AI 主題. Stores the session in topicOrganizer.
  */
 async function prepareTopicOrganizer() {
   if (stateCache.running) throw new AppError("目前正在分析文章，請先停止或等候完成", { code: "BUSY" });
@@ -1564,14 +1662,23 @@ async function prepareTopicOrganizer() {
     if (aiCandidates.length) {
       const requested = await requestOrganizerGroups({
         aiCandidates,
-        standards,
         config,
-        controller,
-        promptOptions: organizerPromptOptions
+        controller
       });
       aiGroups = requested.groups;
       unclassified = uniqueTopicNames([...unclassified, ...requested.unclassifiedTopics]);
       organizerWarnings.push(...requested.warnings);
+      if (aiGroups.length && standards.length) {
+        const matched = await requestTopicStandardMatches({
+          groups: aiGroups,
+          standards,
+          config,
+          controller,
+          promptOptions: organizerPromptOptions
+        });
+        aiGroups = matched.groups;
+        organizerWarnings.push(...matched.warnings);
+      }
     }
     const groups = mergeOrganizerGroups([...confirmedGroups, ...aiGroups]);
     const groupedKeys = new Set(groups.flatMap(group => group.aliases).map(N.topicKey));

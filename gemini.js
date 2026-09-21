@@ -88,7 +88,7 @@
           required: ["standard_topic", "source_topics", "definition", "keep_separate", "reason", "confidence"],
           properties: {
             standard_topic: { type: "string" },
-            source_topics: { type: "array", minItems: 1, maxItems: TOPIC_ORGANIZER_BATCH_LIMIT, items: { type: "string" } },
+            source_topics: { type: "array", minItems: 2, maxItems: TOPIC_ORGANIZER_BATCH_LIMIT, items: { type: "string" } },
             definition: { type: "string" },
             keep_separate: { type: "array", maxItems: TOPIC_ORGANIZER_BATCH_LIMIT, items: { type: "string" } },
             reason: { type: "string" },
@@ -100,6 +100,30 @@
         type: "array",
         maxItems: TOPIC_ORGANIZER_BATCH_LIMIT,
         items: { type: "string" }
+      }
+    }
+  });
+
+  const TOPIC_STANDARD_MATCHER_JSON_SCHEMA = Object.freeze({
+    type: "object",
+    additionalProperties: false,
+    required: ["matches"],
+    properties: {
+      matches: {
+        type: "array",
+        maxItems: TOPIC_ORGANIZER_BATCH_LIMIT,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["group_id", "decision", "matched_topic", "reason", "confidence"],
+          properties: {
+            group_id: { type: "string" },
+            decision: { type: "string", enum: ["reuse_existing", "keep_proposed"] },
+            matched_topic: { type: "string" },
+            reason: { type: "string" },
+            confidence: { type: "string", enum: ["high", "medium", "low"] }
+          }
+        }
       }
     }
   });
@@ -276,6 +300,67 @@
           invalidOutput,
           errors,
           candidateNames,
+          existingStandards,
+          options
+        ) }]
+      }],
+      generationConfig: {
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
+        responseMimeType: "application/json",
+        ...(thinkingConfig ? { thinkingConfig } : {})
+      }
+    };
+  }
+
+  /** Compare fixed provisional groups with the confirmed taxonomy. */
+  function buildTopicStandardMatcherRequest(groups, existingStandards = [], model = DEFAULT_MODEL, options = {}) {
+    return generationPayload(
+      prompt.TOPIC_STANDARD_MATCHER_SYSTEM_PROMPT,
+      prompt.buildTopicStandardMatcherPrompt(groups, existingStandards, options),
+      TOPIC_STANDARD_MATCHER_JSON_SCHEMA,
+      { maxOutputTokens: MAX_OUTPUT_TOKENS, model }
+    );
+  }
+
+  /** Schema-free fallback for models that reject responseJsonSchema. */
+  function buildTopicStandardMatcherCompatibilityRequest(groups, existingStandards = [], model = DEFAULT_MODEL, options = {}) {
+    const thinkingConfig = thinkingConfigForModel(model);
+    return {
+      systemInstruction: {
+        parts: [{ text: prompt.TOPIC_STANDARD_MATCHER_SYSTEM_PROMPT }]
+      },
+      contents: [{
+        role: "user",
+        parts: [{ text: prompt.buildTopicStandardMatcherPrompt(groups, existingStandards, options) }]
+      }],
+      generationConfig: {
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
+        responseMimeType: "application/json",
+        ...(thinkingConfig ? { thinkingConfig } : {})
+      }
+    };
+  }
+
+  /** One-shot repair for an invalid second-stage response. */
+  function buildTopicStandardMatcherRepairRequest(
+    invalidOutput,
+    errors,
+    groups,
+    existingStandards = [],
+    model = DEFAULT_MODEL,
+    options = {}
+  ) {
+    const thinkingConfig = thinkingConfigForModel(model);
+    return {
+      systemInstruction: {
+        parts: [{ text: prompt.TOPIC_STANDARD_MATCHER_SYSTEM_PROMPT }]
+      },
+      contents: [{
+        role: "user",
+        parts: [{ text: prompt.buildTopicStandardMatcherRepairPrompt(
+          invalidOutput,
+          errors,
+          groups,
           existingStandards,
           options
         ) }]
@@ -471,6 +556,112 @@
       .filter(([key]) => unclassifiedKeys.has(key) && !used.has(key))
       .map(([, name]) => name);
     return { ok: true, errors, warnings, value: { groups, unclassified_topics: unclassified } };
+  }
+
+  function normalizeTopicStandardMatcherShape(value) {
+    let source = Array.isArray(value) ? { matches: value } : value;
+    if (!source || typeof source !== "object") return source;
+    let matches = source.matches ?? source.decisions ?? source.results;
+    if (!Array.isArray(matches) && source.result && typeof source.result === "object") {
+      matches = source.result.matches ?? source.result.decisions;
+    }
+    if (!Array.isArray(matches)) return source;
+    const confidenceMap = { 高: "high", 中: "medium", 低: "low" };
+    return {
+      matches: matches.map(entry => ({
+        group_id: entry?.group_id ?? entry?.groupId ?? entry?.id ?? "",
+        decision: entry?.decision ?? entry?.action ?? "",
+        matched_topic: entry?.matched_topic ?? entry?.matchedTopic ?? entry?.existing_topic ?? entry?.existingTopic ?? "",
+        reason: entry?.reason ?? entry?.rationale ?? entry?.explanation ?? "",
+        confidence: confidenceMap[entry?.confidence] ?? entry?.confidence ?? "low"
+      }))
+    };
+  }
+
+  /**
+   * Validates second-stage decisions without permitting group mutation. Any
+   * malformed, unknown, duplicate, or missing decision safely keeps the
+   * first-stage proposed name instead of dropping or regrouping sources.
+   */
+  function validateTopicStandardMatches(value, groups = [], existingStandards = []) {
+    value = normalizeTopicStandardMatcherShape(value);
+    const warnings = [];
+    if (!value || typeof value !== "object" || !Array.isArray(value.matches)) {
+      return { ok: false, errors: ["matches 必須是陣列"], warnings, value: null };
+    }
+    const orderedGroups = (groups ?? []).map((group, index) => ({
+      group_id: shared.cleanText(group?.group_id) || `group_${index + 1}`,
+      proposed_topic: shared.cleanText(group?.proposed_topic ?? group?.standard_topic)
+    })).filter(group => group.proposed_topic);
+    const allowedGroups = new Map(orderedGroups.map(group => [group.group_id, group]));
+    const standards = existingTopicMap(existingStandards);
+    const accepted = new Map();
+    const stats = { malformed: 0, unknownGroup: 0, duplicate: 0, invalidDecision: 0, invalidTopic: 0, missing: 0 };
+    const keepProposed = groupId => ({
+      group_id: groupId,
+      decision: "keep_proposed",
+      matched_topic: "",
+      reason: "未取得有效的既有主題比對，保留第一階段建議名稱。",
+      confidence: "low"
+    });
+    for (const entry of value.matches) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        stats.malformed += 1;
+        continue;
+      }
+      const groupId = shared.cleanText(entry.group_id);
+      if (!allowedGroups.has(groupId)) {
+        stats.unknownGroup += 1;
+        continue;
+      }
+      if (accepted.has(groupId)) {
+        stats.duplicate += 1;
+        continue;
+      }
+      const decision = shared.cleanText(entry.decision);
+      const reason = shared.cleanText(entry.reason).slice(0, 500);
+      const confidence = ["high", "medium", "low"].includes(entry.confidence) ? entry.confidence : "low";
+      if (decision === "keep_proposed") {
+        accepted.set(groupId, {
+          group_id: groupId,
+          decision,
+          matched_topic: "",
+          reason: reason || "既有主題與此群組範圍不相同，保留第一階段建議名稱。",
+          confidence
+        });
+        continue;
+      }
+      if (decision !== "reuse_existing") {
+        stats.invalidDecision += 1;
+        accepted.set(groupId, keepProposed(groupId));
+        continue;
+      }
+      const matchedTopic = standards.get(topicKey(entry.matched_topic));
+      if (!matchedTopic) {
+        stats.invalidTopic += 1;
+        accepted.set(groupId, keepProposed(groupId));
+        continue;
+      }
+      accepted.set(groupId, {
+        group_id: groupId,
+        decision,
+        matched_topic: matchedTopic,
+        reason: reason || `沿用既有主題「${matchedTopic}」。`,
+        confidence
+      });
+    }
+    const matches = orderedGroups.map(group => {
+      if (accepted.has(group.group_id)) return accepted.get(group.group_id);
+      stats.missing += 1;
+      return keepProposed(group.group_id);
+    });
+    if (stats.malformed) warnings.push(`已忽略 ${stats.malformed} 筆格式不正確的既有主題比對`);
+    if (stats.unknownGroup) warnings.push(`已忽略 ${stats.unknownGroup} 筆未知群組的既有主題比對`);
+    if (stats.duplicate) warnings.push(`已忽略 ${stats.duplicate} 筆重複群組的既有主題比對`);
+    if (stats.invalidDecision) warnings.push(`${stats.invalidDecision} 筆決策值無效，已保留第一階段建議名稱`);
+    if (stats.invalidTopic) warnings.push(`${stats.invalidTopic} 筆沿用名稱不在既有 AI 主題中，已保留第一階段建議名稱`);
+    if (stats.missing) warnings.push(`${stats.missing} 個群組缺少比對結果，已保留第一階段建議名稱`);
+    return { ok: true, errors: [], warnings, value: { matches } };
   }
 
   /**
@@ -890,6 +1081,7 @@
     CHUNK_JSON_SCHEMA,
     TOPIC_ORGANIZER_BATCH_LIMIT,
     TOPIC_ORGANIZER_JSON_SCHEMA,
+    TOPIC_STANDARD_MATCHER_JSON_SCHEMA,
     CHUNK_TEXT_LIMIT,
     DEFAULT_MODEL,
     DIRECT_TEXT_LIMIT,
@@ -901,6 +1093,9 @@
     buildTopicOrganizerCompatibilityRequest,
     buildTopicOrganizerRepairRequest,
     buildTopicOrganizerRequest,
+    buildTopicStandardMatcherCompatibilityRequest,
+    buildTopicStandardMatcherRepairRequest,
+    buildTopicStandardMatcherRequest,
     candidateText,
     formatChunkNotes,
     generationPayload,
@@ -908,6 +1103,7 @@
     isOrganizerTopicLabel,
     isExcludedPersonKeyword,
     normalizeTopicOrganizerShape,
+    normalizeTopicStandardMatcherShape,
     parseJsonCandidate,
     responseDiagnostic,
     sanitizeDiagnostic,
@@ -915,6 +1111,7 @@
     usableModels,
     validateAnalysis,
     validateChunkNotes,
-    validateTopicOrganizer
+    validateTopicOrganizer,
+    validateTopicStandardMatches
   });
 });
