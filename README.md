@@ -6,7 +6,7 @@
 
 Siftly is a Chrome extension that helps you organize articles stored in Notion. It analyzes the plain text of a page, generates a Traditional Chinese title, summary, keywords, and provisional topics, and writes the results back to Notion.
 
-Traditional Chinese: [`README.zh-TW.md`](README.zh-TW.md)
+正體中文（臺灣）: [`README.zh-TW.md`](README.zh-TW.md)
 
 The user interface is written in Traditional Chinese and localized for users in Taiwan. The source code and developer documentation are maintained primarily in English.
 
