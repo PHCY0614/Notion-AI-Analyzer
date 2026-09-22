@@ -366,6 +366,38 @@ input:focus, select:focus, textarea:focus { border-color: var(--green); box-shad
   cursor: pointer;
 }
 .topic-skip { margin-top: 9px; }
+.topic-group-reason {
+  white-space: pre-line;
+}
+.apply-progress {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid #d4ded7;
+  border-radius: 12px;
+  background: var(--green-soft);
+}
+.apply-progress[hidden] { display: none !important; }
+.apply-progress__track {
+  overflow: hidden;
+  height: 10px;
+  border-radius: 999px;
+  background: #d7e6dc;
+}
+.apply-progress__fill {
+  height: 100%;
+  width: 0%;
+  border-radius: inherit;
+  background: var(--green);
+  transition: width .2s ease;
+}
+.apply-progress__label {
+  margin: 0;
+  color: var(--green-dark);
+  font-size: 13px;
+  font-weight: 650;
+}
 .dictionary-actions {
   display: flex;
   gap: 8px;
@@ -375,8 +407,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--green); box-shad
   height: 44px;
   min-height: 44px;
   margin: 0;
-  padding: 9px 12px;
-  font-size: 14px;
+  padding: 9px 16px;
+  font: inherit;
   font-weight: 750;
 }
 .split-btn { position: relative; display: inline-flex; }
@@ -402,7 +434,6 @@ input:focus, select:focus, textarea:focus { border-color: var(--green); box-shad
   background: transparent;
   color: var(--ink);
   font: inherit;
-  font-size: 14px;
   font-weight: 750;
   cursor: pointer;
   white-space: nowrap;
@@ -478,13 +509,21 @@ input:focus, select:focus, textarea:focus { border-color: var(--green); box-shad
 .confirm-dialog__body { padding: 26px 26px 20px; }
 .confirm-dialog__body h2 { margin-bottom: 12px; }
 .confirm-dialog__body p { overflow-wrap: anywhere; }
+.confirm-dialog__message {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  line-height: 1.5;
+}
 .confirm-dialog__scope {
   margin-top: 14px;
   padding: 12px 14px;
   border-radius: 10px;
   background: var(--green-soft);
   color: var(--green-dark);
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.55;
 }
 .confirm-dialog__actions {
   display: flex;

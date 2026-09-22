@@ -226,14 +226,26 @@ async function googleGenerativeRequest(model, payload, options, descriptor) {
       continue;
     }
 
+    // Free AI Studio RPM is low; wait and retry a bounded number of times
+    // before surfacing a short Traditional Chinese rate-limit message.
+    if (response.status === 429 && attempt < 4) {
+      await abortableSleep(Math.max(retryDelay(response, attempt), (attempt + 1) * 4000), options.signal);
+      attempt += 1;
+      continue;
+    }
+
     let code = `${descriptor.codePrefix}_API`;
     if (response.status === 429) code = `${descriptor.codePrefix}_RATE_LIMIT`;
     else if ([400, 401, 403].includes(response.status)
       && descriptor.authPattern.test(errorMessage(data, ""))) code = `${descriptor.codePrefix}_AUTH`;
     else if (response.status === 404) code = "MODEL_NOT_FOUND";
-    throw new AppError(errorMessage(data, `${descriptor.apiErrorPrefix} ${response.status}`), {
+    const retryAfter = Number(response.headers.get("retry-after")) || 0;
+    const message = response.status === 429
+      ? "已達 Google AI 速率或額度上限，請稍後再繼續"
+      : errorMessage(data, `${descriptor.apiErrorPrefix} ${response.status}`);
+    throw new AppError(message, {
       code,
-      retryAfter: Number(response.headers.get("retry-after")) || 0,
+      retryAfter,
       status: response.status
     });
   }

@@ -271,6 +271,8 @@ async function recordFailure(item, error, token) {
  * also requeue and pause; other errors record 分析失敗. A queue/database
  * mismatch drops the local queue without writing pages.
  */
+let lastAiPageCallAt = 0;
+
 async function processItem(item) {
   let token = "";
   const controller = new AbortController();
@@ -334,6 +336,14 @@ async function processItem(item) {
     if (stateCache.stopRequested) throw new DOMException("已停止", "AbortError");
 
     await setStage("準備 AI", { pageId: item.id });
+    if ((config.aiProvider || "gemini") !== "vertex") {
+      const waitMs = Math.max(0, AI_STUDIO_PAGE_GAP_MS - (Date.now() - lastAiPageCallAt));
+      if (waitMs > 0) {
+        await setStage("等待速率配額", { pageId: item.id, detail: `約 ${Math.ceil(waitMs / 1000)} 秒` });
+        await abortableSleep(waitMs, controller.signal);
+      }
+    }
+    lastAiPageCallAt = Date.now();
     const result = await analyzeArticle(articleText, config, controller.signal);
     if (stateCache.stopRequested) throw new DOMException("已停止", "AbortError");
 
@@ -391,10 +401,13 @@ async function processItem(item) {
         { resetPage: true }
       );
     } else if (RATE_LIMIT_CODES.has(error.code)) {
-      const wait = error.retryAfter ? `，建議 ${error.retryAfter} 秒後再繼續` : "，請稍後再繼續";
+      const wait = error.retryAfter ? `（建議約 ${error.retryAfter} 秒後）` : "";
+      const friendly = error.code === "NOTION_RATE_LIMIT"
+        ? `Notion 請求過於頻繁${wait}，請稍後再繼續`
+        : `${AI_RATE_LIMIT_USER_MESSAGE}${wait}`;
       await requeueAndPause(
         item,
-        `API 已達速率或額度限制${wait}：${S.truncateMessage(error.message)}`,
+        friendly,
         token,
         { resetPage: true }
       );

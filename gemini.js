@@ -639,7 +639,7 @@
           group_id: groupId,
           decision,
           matched_topic: "",
-          reason: reason || "既有主題與此群組範圍不相同，保留第一階段建議名稱。",
+          reason: reason || "與既有主題比對後範圍不相同，保留第一階段建議名稱。",
           confidence
         });
         continue;

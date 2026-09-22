@@ -31,6 +31,9 @@ const MAX_PERSISTED_STATE_BYTES = 4 * 1024 * 1024;
 const CURRENT_PROMPT_VERSION = "2026-08-26-1";
 const TOPIC_ORGANIZER_CACHE_VERSION = 10;
 const TOPIC_ORGANIZER_BATCH_LIMIT = G.TOPIC_ORGANIZER_BATCH_LIMIT;
+// Conservative gap between page-level AI Studio calls (~5 RPM headroom).
+const AI_STUDIO_PAGE_GAP_MS = 12000;
+const AI_RATE_LIMIT_USER_MESSAGE = "已達 Google AI 速率或額度上限，請稍後再繼續";
 const DEFAULT_EXCLUDED_PERSON_TERMS = Object.freeze([]);
 const REQUEUE_TIMEOUT_CODES = new Set([
   "AI_TIMEOUT",
