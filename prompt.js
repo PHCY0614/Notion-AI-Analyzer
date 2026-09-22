@@ -174,7 +174,7 @@ RULES
 - Never merge, split, rename, omit, or reassign a group or any source topic.
 - reuse_existing is allowed only when one supplied existing AI topic covers the group's retrieval scope under the rules below. matched_topic must then exactly copy that existing topic name.
 - keep_proposed means no supplied existing AI topic is suitable. matched_topic must then be an empty string.
-- keep_proposed reasons must name the closest unsuitable existing topic or topics in Traditional Chinese (Taiwan), e.g. 「與既有主題『旅行』範圍不同」; when several were close, list each name clearly.
+- keep_proposed reasons must name the closest unsuitable existing topic or topics in Traditional Chinese (Taiwan), e.g. 與既有主題「旅行」範圍不同; when several were close, list each name clearly. Use 「」 around topic names, never 『』.
 - reuse_existing reasons must name that exact matched_topic.
 - When existing-topic priority mode is off, reuse only for substantially the same retrieval scope. A merely broader, narrower, parent, child, related, or same-field topic is not the same scope.
 - When existing-topic priority mode is on, follow its broader reasonable-coverage rule, but never reuse a topic that would materially mislead retrieval.

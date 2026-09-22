@@ -54,11 +54,47 @@ function testThemeSuggestionFormatting() {
   const optionsJs = source("options.js");
   const organizer = source("background/topic-organizer.js");
   assert.match(optionsJs, /function formatOrganizerReasonText\(/);
-  assert.match(optionsJs, /replace\(\/；\/g, "；\\n"\)/);
+  assert.match(optionsJs, /function normalizeThemeNameQuotes\(/);
   assert.match(optionsJs, /topic-group-reason/);
-  assert.match(organizer, /既有主題比對（\$\{themeName\}）/);
+  assert.match(optionsJs, /既有主題\\n說明：/);
+  assert.match(optionsJs, /refreshOrganizerAfterTargetChange/);
+  assert.match(optionsJs, /config\.databaseChanged/);
+  assert.match(optionsJs, /GET_TOPIC_ORGANIZER/);
+  assert.match(organizer, /既有主題比對：\$\{compareDetail\}/);
   assert.match(organizer, /compareSegment/);
+  assert.match(organizer, /existing: true/);
+  assert.doesNotMatch(organizer, /既有主題比對（\$\{themeName\}）/);
   assert.match(source("prompt.js"), /keep_proposed reasons must name the closest unsuitable existing topic/);
+  assert.match(source("prompt.js"), /Use 「」 around topic names, never 『』/);
+
+  // Behavioral checks for display formatting.
+  const start = optionsJs.indexOf("function normalizeThemeNameQuotes");
+  const end = optionsJs.indexOf("function updateApplyProgressUi");
+  assert.ok(start >= 0 && end > start, "formatter helpers present");
+  const sandbox = { console };
+  vm.createContext(sandbox);
+  vm.runInContext(optionsJs.slice(start, end), sandbox);
+  assert.equal(
+    sandbox.formatOrganizerReasonText("日常紀錄；既有主題比對（生活日常）：生活日常", { existing: true }),
+    "既有主題\n說明：日常紀錄"
+  );
+  assert.equal(
+    sandbox.formatOrganizerReasonText("偏旅行規劃；既有主題比對：與既有主題『旅行』範圍不同", { existing: false }),
+    "說明：偏旅行規劃\n既有主題比對：與既有主題「旅行」範圍不同"
+  );
+  assert.equal(
+    sandbox.formatOrganizerReasonText("既有主題比對（生活日常）：生活日常", {}),
+    "既有主題\n說明：未提供說明"
+  );
+}
+
+function testConfirmDialogBoldWeight() {
+  const optionsCss = source("options.css");
+  const popupCss = source("popup.css");
+  assert.match(optionsCss, /\.confirm-dialog__body h2 \{[^}]*font-weight:\s*700;/s);
+  assert.match(optionsCss, /\.confirm-dialog__message \{[^}]*font-weight:\s*400;/s);
+  assert.match(popupCss, /\.confirm-dialog__body h2 \{[^}]*font-weight:\s*700;/s);
+  assert.match(popupCss, /\.confirm-dialog__message \{[^}]*font-weight:\s*400;/s);
 }
 
 function testDictionaryDefinitionPreservation() {
@@ -157,6 +193,7 @@ testNotionWebAndFieldsTips();
 testDictionaryButtonFontMatches();
 testApplyProgressUi();
 testThemeSuggestionFormatting();
+testConfirmDialogBoldWeight();
 testDictionaryDefinitionPreservation();
 testRateLimitBackoffAndThrottle();
 console.log("ux polish tests passed");
