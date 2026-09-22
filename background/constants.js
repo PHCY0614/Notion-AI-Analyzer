@@ -20,7 +20,9 @@ const MAX_BLOCKS = 10000;
 const MAX_RECENT = 40;
 const MAX_FAILED_PAGES_TO_LOAD = 40;
 const MAX_STORED_PAGE_TITLE_CHARACTERS = N.MAX_STORED_PAGE_TITLE_CHARACTERS;
-const MAX_ARTICLE_CHARACTERS = 120000;
+// Hard cap after DIRECT_TEXT_LIMIT (180k) so long articles can use the
+// chunk-notes pipeline. About ten CHUNK_TEXT_LIMIT (78k) pieces.
+const MAX_ARTICLE_CHARACTERS = 780000;
 const MAX_INPUT_TOKENS = 350000;
 const TOKEN_PREFLIGHT_CHARACTERS = 80000;
 const MAX_PENDING_PAGES = 2000;
@@ -120,3 +122,4 @@ let stateCache = null;
 let activeAbortController = null;
 let processingPromise = null;
 let preparedDataSourceId = "";
+let customAnalysisPromptCleared = false;

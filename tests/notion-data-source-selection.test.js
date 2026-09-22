@@ -549,6 +549,86 @@ async function testConfirmedStatusFieldPreparation() {
   assert.equal(requests.filter(request => request.options.method === "PATCH").length, 0);
 }
 
+async function testInspectPageDoesNotPatchSchema() {
+  const N = require(path.join(root, "notion.js"));
+  const PAGE_ID = "33333333-3333-4333-8333-333333333333";
+  const SIBLING_PAGE = "44444444-4444-4444-8444-444444444444";
+  setConfig({ notionTarget: SOURCE_A, dataSourceId: SOURCE_A, databaseId: DB_A });
+  setState();
+  sessionData[TOKEN_KEY] = "session-token";
+  const properties = {
+    Name: { type: "title", title: {} },
+    [N.PROPERTY_NAMES.processingStatus]: {
+      type: "select",
+      select: { options: [{ name: N.STATUS.pending, color: "yellow" }] }
+    }
+  };
+  const requests = [];
+  context.fetch = async (url, options) => {
+    const request = { url, options: plain(options) };
+    requests.push(request);
+    if (url.endsWith(`/v1/data_sources/${SOURCE_A}`) && (!options.method || options.method === "GET")) {
+      return fetchResponse(dataSource(SOURCE_A, DB_A, "內容資料庫", { properties }));
+    }
+    if (url.endsWith(`/v1/pages/${PAGE_ID}`) && (!options.method || options.method === "GET")) {
+      return fetchResponse({
+        id: PAGE_ID,
+        url: `https://www.notion.so/${PAGE_ID.replaceAll("-", "")}`,
+        parent: { type: "data_source_id", data_source_id: SOURCE_A, database_id: DB_A },
+        properties: { Name: { type: "title", title: [{ plain_text: "目前頁面" }] } }
+      });
+    }
+    if (url.endsWith(`/v1/pages/${SIBLING_PAGE}`) && (!options.method || options.method === "GET")) {
+      return fetchResponse({
+        id: SIBLING_PAGE,
+        url: `https://example.com/not-notion/${SIBLING_PAGE}`,
+        parent: { type: "data_source_id", data_source_id: SOURCE_B, database_id: DB_A },
+        properties: { Name: { type: "title", title: [{ plain_text: "其他來源" }] } }
+      });
+    }
+    throw new Error(`unexpected request: ${options.method || "GET"} ${url}`);
+  };
+
+  const inspected = await send({ type: "INSPECT_PAGE", pageId: PAGE_ID });
+  assert.equal(inspected.ok, true);
+  assert.equal(inspected.data.id, PAGE_ID);
+  assert.equal(requests.filter(request => request.options.method === "PATCH").length, 0);
+  assert.ok(requests.some(request => request.url.endsWith(`/v1/pages/${PAGE_ID}`)));
+
+  requests.length = 0;
+  const sibling = await send({ type: "INSPECT_PAGE", pageId: SIBLING_PAGE });
+  assert.equal(sibling.ok, false);
+  assert.equal(sibling.error.code, "PAGE_OUTSIDE_DATA_SOURCE");
+  assert.equal(requests.filter(request => request.options.method === "PATCH").length, 0);
+}
+
+async function testNotionPathAndPageBelongs() {
+  let pathError = null;
+  try {
+    await vm.runInContext(`notionRequest("/pages/x", { token: "token" })`, context);
+  } catch (error) {
+    pathError = error;
+  }
+  assert.equal(pathError?.code, "NOTION_PATH_INVALID");
+
+  assert.equal(vm.runInContext(`pageBelongsToConfiguredSource(
+    { parent: { data_source_id: ${JSON.stringify(SOURCE_A)}, database_id: ${JSON.stringify(DB_A)} } },
+    { dataSourceId: ${JSON.stringify(SOURCE_A)}, databaseId: ${JSON.stringify(DB_A)} }
+  )`, context), true);
+  assert.equal(vm.runInContext(`pageBelongsToConfiguredSource(
+    { parent: { data_source_id: ${JSON.stringify(SOURCE_B)}, database_id: ${JSON.stringify(DB_A)} } },
+    { dataSourceId: ${JSON.stringify(SOURCE_A)}, databaseId: ${JSON.stringify(DB_A)} }
+  )`, context), false);
+  assert.equal(vm.runInContext(`pageBelongsToConfiguredSource(
+    { parent: { database_id: ${JSON.stringify(DB_A)} } },
+    { dataSourceId: ${JSON.stringify(SOURCE_A)}, databaseId: ${JSON.stringify(DB_A)} }
+  )`, context), true);
+  assert.equal(vm.runInContext(`pageBelongsToConfiguredSource(
+    { parent: { database_id: ${JSON.stringify(DB_B)} } },
+    { dataSourceId: ${JSON.stringify(SOURCE_A)}, databaseId: ${JSON.stringify(DB_A)} }
+  )`, context), false);
+}
+
 function testRepositoryGuards() {
   const transport = source("background/transport.js");
   const listFunction = transport.slice(
@@ -581,6 +661,8 @@ function testRepositoryGuards() {
   assert.match(html, /id="notion-status-dialog"/);
   assert.match(html, /value="cancel" autofocus>暫不新增/);
   assert.match(html, /value="confirm">新增並繼續/);
+  assert.match(html, /id="fields-heading">準備 Notion 欄位/);
+  assert.doesNotMatch(html, /Notion-AI-Analyzer/);
 
   const manifest = JSON.parse(source("manifest.json"));
   assert.equal(manifest.version, "1.1.0");
@@ -604,6 +686,8 @@ async function main() {
   await testSafeErrors();
   await testSameTargetAndDatabaseChangeGuards();
   await testConfirmedStatusFieldPreparation();
+  await testInspectPageDoesNotPatchSchema();
+  await testNotionPathAndPageBelongs();
   testRepositoryGuards();
   console.log("Notion data source selection tests passed");
 }

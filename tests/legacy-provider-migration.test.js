@@ -167,10 +167,11 @@ async function main() {
   assert.ok(countedBody?.generateContentRequest?.systemInstruction);
   assert.ok(countedBody?.generateContentRequest?.contents);
 
-  assert.doesNotThrow(() => vm.runInContext('assertArticleSize("字".repeat(120000))', context));
+  assert.doesNotThrow(() => vm.runInContext('assertArticleSize("字".repeat(180001))', context));
+  assert.doesNotThrow(() => vm.runInContext('assertArticleSize("字".repeat(780000))', context));
   let articleError = null;
   try {
-    vm.runInContext('assertArticleSize("字".repeat(120001))', context);
+    vm.runInContext('assertArticleSize("字".repeat(780001))', context);
   } catch (error) {
     articleError = error;
   }

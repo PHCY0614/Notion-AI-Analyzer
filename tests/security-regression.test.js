@@ -88,8 +88,15 @@ function testBoundedPageSummaries() {
 
 function testRepositoryGuards() {
   const background = serviceWorkerSource();
-  assert.match(background, /MAX_ARTICLE_CHARACTERS = 120000/);
+  assert.match(background, /MAX_ARTICLE_CHARACTERS = 780000/);
   assert.match(background, /assertArticleSize\(articleText\)/);
+  assert.ok(G.DIRECT_TEXT_LIMIT < 780000, "hard article cap must sit above the direct-text limit so chunking can run");
+  assert.equal(G.DIRECT_TEXT_LIMIT, 180000);
+  assert.equal(G.CHUNK_TEXT_LIMIT, 78000);
+  assert.match(source("background/analysis.js"), /articleText\.length <= directTextLimit/);
+  assert.match(source("background/topic-review.js"), /readyNotion\(\{ mutateSchema: false \}\)/);
+  assert.match(source("background/settings.js"), /options\.mutateSchema !== false/);
+  assert.match(source("background/transport.js"), /path\.startsWith\("\/v1\/"\)/);
   assert.match(background, /MAX_INPUT_TOKENS = 350000/);
   assert.match(background, /:countTokens/);
   assert.match(background, /MAX_PENDING_PAGES = 2000/);
@@ -104,6 +111,8 @@ function testRepositoryGuards() {
     "https://generativelanguage.googleapis.com/*",
     "https://aiplatform.googleapis.com/*"
   ]);
+  assert.equal(manifest.content_security_policy.extension_pages, "script-src 'self'; object-src 'self'");
+  assert.doesNotMatch(manifest.content_security_policy.extension_pages, /unsafe-eval|unsafe-inline|https:/);
 
   for (const name of ["options.html", "options.js", "README.md", "README.zh-TW.md", "PRIVACY.md", "PRIVACY.zh-TW.md"]) {
     assert.doesNotMatch(source(name), /openrouter/i, `${name} still advertises the removed provider`);
@@ -132,6 +141,9 @@ function testAdvancedSettingsHidePromptControls() {
   const settings = source("background/settings.js");
   assert.doesNotMatch(settings, /finalPromptPreview|defaultPromptUpdated|defaultAnalysisPrompt/);
   assert.match(settings, /delete publicConfig\.analysisPrompt/);
+  assert.match(settings, /analysisPrompt: ""/);
+  assert.match(source("background/analysis.js"), /customPrompt: ""/);
+  assert.doesNotMatch(source("background/analysis.js"), /config\.analysisPromptCustomized/);
 }
 
 function testReanalyzeConfirmHelper() {
@@ -146,6 +158,22 @@ function testReanalyzeConfirmHelper() {
   );
   assert.doesNotMatch(popup, /confirm\("重新分析/);
   assert.match(source("popup.html"), /id="reanalyze-hint"/);
+}
+
+function testBatchAiConfirmHelper() {
+  const popup = source("popup.js");
+  assert.match(popup, /function confirmBatchAiSend\(/);
+  assert.match(popup, /function batchAiSendConfirmMessage\(/);
+  assert.match(popup, /佇列中的待處理／失敗頁面/);
+  assert.match(popup, /未付費的 AI Studio 可能將內容用於改善產品/);
+  assert.equal(
+    (popup.match(/confirmBatchAiSend\(/g) || []).length,
+    3,
+    "ANALYZE_ALL and RETRY_FAILED must share one confirm helper"
+  );
+  assert.match(popup, /SCAN_PENDING/);
+  const scanHandler = popup.slice(popup.indexOf("buttons.scan.addEventListener"), popup.indexOf("buttons.queueControl.addEventListener"));
+  assert.doesNotMatch(scanHandler, /confirmBatchAiSend/);
 }
 
 function testCustomSelectArrow() {
@@ -177,5 +205,6 @@ testBoundedPageSummaries();
 testRepositoryGuards();
 testAdvancedSettingsHidePromptControls();
 testReanalyzeConfirmHelper();
+testBatchAiConfirmHelper();
 testCustomSelectArrow();
 console.log("security regression tests passed");

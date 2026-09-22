@@ -15,6 +15,9 @@
     "alarms",
     "activeTab"
   ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
   "host_permissions": [
     "https://api.notion.com/*",
     "https://generativelanguage.googleapis.com/*",

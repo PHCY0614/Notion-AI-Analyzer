@@ -27,6 +27,7 @@ function testManifestAndEntrypoint() {
   assert.equal(manifest.background.service_worker, "background.js");
   assert.equal(manifest.background.type, undefined, "service worker stays a classic script, not an ES module");
   assert.equal(manifest.version, "1.1.0");
+  assert.equal(manifest.content_security_policy.extension_pages, "script-src 'self'; object-src 'self'");
 }
 
 function testImportMap() {
@@ -87,7 +88,7 @@ function testCriticalWiring() {
   assert.doesNotMatch(messages, /GET_PROMPT_PREVIEW/);
 
   const sw = serviceWorkerSource();
-  assert.match(sw, /MAX_ARTICLE_CHARACTERS = 120000/);
+  assert.match(sw, /MAX_ARTICLE_CHARACTERS = 780000/);
   assert.match(sw, /assertArticleSize\(articleText\)/);
   assert.match(sw, /MAX_INPUT_TOKENS = 350000/);
   assert.match(sw, /:countTokens/);

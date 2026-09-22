@@ -119,13 +119,14 @@ async function resolveDataSource(config, token) {
  * schemaPlan error throws before PATCH: missing 整理狀態, a non-select
  * 整理狀態, a select without 待分析, or a wrong type on AI 標題 / AI 主題 /
  * AI 暫定主題 / AI 關鍵字 / AI 摘要. Those failures block analysis. Missing
- * analysis properties other than 整理狀態 may be PATCHed in. If 整理狀態
+ * analysis properties other than 整理狀態 may be PATCHed in unless
+ * options.mutateSchema is false (INSPECT_PAGE / popup open). If 整理狀態
  * already has 待分析, missing other status options may be PATCHed while
  * existing option ids are kept; 整理狀態 is never created or type-converted
  * here. Copies preferExistingTopics from the notionTarget UUID key onto the
- * data source key, then writeConfig with resolved ids. Not read-only.
+ * data source key, then writeConfig with resolved ids.
  */
-async function ensureSchema(config, token) {
+async function ensureSchema(config, token, options = {}) {
   let resolved;
   if (config.dataSourceId) {
     try {
@@ -144,7 +145,7 @@ async function ensureSchema(config, token) {
     });
   }
   let dataSource = resolved.dataSource;
-  if (plan.changed) {
+  if (plan.changed && options.mutateSchema !== false) {
     dataSource = await notionRequest(`/v1/data_sources/${resolved.dataSourceId}`, {
       method: "PATCH",
       body: { properties: plan.properties },
@@ -225,18 +226,23 @@ async function prepareNotionStatusField() {
 /**
  * Shared credentials/config/schema gate for scans, queue start, organizer
  * apply, page inspection, and connection tests. Requires a Notion token,
- * reads config, then ensureSchema (may PATCH missing schema and persists
- * resolved ids). On NOTION_STATUS_FIELD_MISSING, NOTION_STATUS_FIELD_TYPE,
- * or NOTION_PENDING_OPTION_MISSING, records databaseCheck before rethrowing so
+ * reads config, then ensureSchema. Default mutateSchema is true (may PATCH
+ * missing schema and persists resolved ids). Pass { mutateSchema: false }
+ * for INSPECT_PAGE / popup open: GET and persist ids only, no schema PATCH,
+ * and do not mark preparedDataSourceId so later analysis can still repair.
+ * On NOTION_STATUS_FIELD_MISSING, NOTION_STATUS_FIELD_TYPE, or
+ * NOTION_PENDING_OPTION_MISSING, records databaseCheck before rethrowing so
  * the UI can show the 整理狀態 setup failure. Other setup errors propagate
- * without that write. Sets preparedDataSourceId on success. Not read-only.
+ * without that write.
  */
-async function readyNotion() {
+async function readyNotion(options = {}) {
   const token = await requireNotionToken();
   const config = await readConfig();
   try {
-    const ready = await ensureSchema(config, token);
-    preparedDataSourceId = compactNotionId(ready.config.dataSourceId);
+    const ready = await ensureSchema(config, token, options);
+    if (options.mutateSchema !== false) {
+      preparedDataSourceId = compactNotionId(ready.config.dataSourceId);
+    }
     return { ...ready, token };
   } catch (error) {
     if (["NOTION_STATUS_FIELD_MISSING", "NOTION_STATUS_FIELD_TYPE", "NOTION_PENDING_OPTION_MISSING"].includes(error.code)) {
@@ -343,18 +349,25 @@ function resolveProviderSelection(settings, current) {
 
 function resolvePromptSettings(settings, current) {
   const outputSpec = P.normalizeOutputSpec(settings.outputSpec ?? current.outputSpec);
-  // Custom-prompt UI is gone; keep any previously stored customization so
-  // analysis still honours it. Incoming SAVE_SETTINGS from the options page
-  // omits these keys, so they persist unchanged.
-  const analysisPrompt = settings.analysisPrompt === undefined
-    ? S.cleanText(current.analysisPrompt)
-    : String(settings.analysisPrompt ?? "").trim().slice(0, 30000);
-  const analysisPromptCustomized = settings.analysisPromptCustomized === undefined
-    ? Boolean(current.analysisPromptCustomized)
-    : Boolean(settings.analysisPromptCustomized) && Boolean(analysisPrompt);
+  // Custom-prompt UI is gone. Ignore analysisPrompt / analysisPromptCustomized
+  // from SAVE_SETTINGS so a partial or forged message cannot restore a hidden
+  // prompt. Leftovers are cleared on readConfig and again here on save.
+  if (
+    hasLeftoverCustomAnalysisPrompt(current)
+    || Object.hasOwn(settings, "analysisPrompt")
+    || Object.hasOwn(settings, "analysisPromptCustomized")
+  ) {
+    if (
+      hasLeftoverCustomAnalysisPrompt(current)
+      || Boolean(S.cleanText(settings.analysisPrompt))
+      || Boolean(settings.analysisPromptCustomized)
+    ) {
+      customAnalysisPromptCleared = true;
+    }
+  }
   const timeoutValue = Number(settings.requestTimeoutMinutes ?? current.requestTimeoutMinutes);
   const requestTimeoutMinutes = [0, 3, 5, 10].includes(timeoutValue) ? timeoutValue : 5;
-  return { analysisPrompt, analysisPromptCustomized, outputSpec, requestTimeoutMinutes };
+  return { analysisPrompt: "", analysisPromptCustomized: false, outputSpec, requestTimeoutMinutes };
 }
 
 function notionTargetChanged(current, nextTargetId) {
@@ -417,9 +430,15 @@ function buildNextConfig(settings, current, resolved) {
     notionTarget,
     geminiModel: provider.geminiModel,
     vertexModel: provider.vertexModel,
-    rememberGeminiKey: Boolean(settings.rememberGeminiKey),
-    rememberVertexKey: Boolean(settings.rememberVertexKey),
-    rememberNotionToken: Boolean(settings.rememberNotionToken),
+    rememberGeminiKey: Object.hasOwn(settings, "rememberGeminiKey")
+      ? Boolean(settings.rememberGeminiKey)
+      : Boolean(current.rememberGeminiKey),
+    rememberVertexKey: Object.hasOwn(settings, "rememberVertexKey")
+      ? Boolean(settings.rememberVertexKey)
+      : Boolean(current.rememberVertexKey),
+    rememberNotionToken: Object.hasOwn(settings, "rememberNotionToken")
+      ? Boolean(settings.rememberNotionToken)
+      : Boolean(current.rememberNotionToken),
     requestTimeoutMinutes: promptSettings.requestTimeoutMinutes,
     outputSpec: promptSettings.outputSpec,
     preferExistingTopicsByDataSource,
@@ -470,14 +489,19 @@ function buildSaveResponse(next, resolved) {
   const { clearedQueueCount, preferExistingTopics, provider, secrets, targetChanged } = resolved;
   const { aiProvider, geminiModel, vertexModel } = provider;
   const { hasGeminiKey, hasNotionToken, hasVertexKey } = secrets;
+  const publicNext = { ...next };
+  delete publicNext.analysisPrompt;
+  delete publicNext.analysisPromptCustomized;
+  delete publicNext.promptBaseVersion;
   return {
-    ...next,
+    ...publicNext,
     preferExistingTopics,
     activeModel: aiProvider === "vertex" ? vertexModel : geminiModel,
     hasAiKey: aiProvider === "vertex" ? hasVertexKey : hasGeminiKey,
     hasGeminiKey,
     hasNotionToken,
     hasVertexKey,
+    customPromptCleared: customAnalysisPromptCleared,
     databaseChanged: targetChanged,
     clearedQueueCount
   };
@@ -540,7 +564,8 @@ async function saveSettings(settings) {
  * has*Key booleans. Spreads ids, models, topic dictionary,
  * discardedTopicNames, and preferExistingTopicsByDataSource, and adds
  * preferExistingTopics for the current data source. Custom analysis-prompt
- * fields stay in storage for analysis but are not exposed to the UI.
+ * fields are never returned. customPromptCleared is true after a leftover
+ * hidden prompt was detected and cleared in this service-worker lifetime.
  * Does not call Notion or AI.
  */
 async function getConfigForUi() {
@@ -561,6 +586,7 @@ async function getConfigForUi() {
     aiProvider,
     activeModel: aiProvider === "vertex" ? config.vertexModel : config.geminiModel,
     excludedPersonTerms: normalizeExcludedPersonTerms(config.excludedPersonTerms),
+    customPromptCleared: customAnalysisPromptCleared,
     hasAiKey: aiProvider === "vertex" ? Boolean(vertexKey) : Boolean(geminiKey),
     hasGeminiKey: Boolean(geminiKey),
     hasNotionToken: Boolean(notionToken),

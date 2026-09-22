@@ -48,6 +48,9 @@ function abortableSleep(milliseconds, signal) {
 
 // ==== Notion transport ====
 async function notionRequest(path, options = {}) {
+  if (typeof path !== "string" || !path.startsWith("/v1/")) {
+    throw new AppError("Notion 請求路徑無效", { code: "NOTION_PATH_INVALID" });
+  }
   const token = options.token || await requireNotionToken();
   const method = options.method || "GET";
   const retrySafe = options.retrySafe !== false;

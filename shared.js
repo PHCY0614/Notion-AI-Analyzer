@@ -128,12 +128,36 @@
     return chunks.filter(Boolean);
   }
 
+  /**
+   * Popup Notion page links. Only https URLs on notion.so, www.notion.so,
+   * app.notion.com, notion.site, www.notion.site, or *.notion.site (the
+   * hosts Notion's API and web app actually use). Otherwise "".
+   */
+  function safeNotionPageHref(value) {
+    try {
+      const url = new URL(String(value ?? ""));
+      if (url.protocol !== "https:") return "";
+      if (url.username || url.password) return "";
+      const host = url.hostname.toLowerCase();
+      const allowed = host === "notion.so"
+        || host === "www.notion.so"
+        || host === "app.notion.com"
+        || host === "notion.site"
+        || host === "www.notion.site"
+        || (host.endsWith(".notion.site") && host !== ".notion.site");
+      return allowed ? url.href : "";
+    } catch {
+      return "";
+    }
+  }
+
   return Object.freeze({
     chunkText,
     cleanText,
     extractNotionId,
     normalizeModelName,
     normalizeUuid,
+    safeNotionPageHref,
     sleep,
     truncateMessage,
     visibleLength

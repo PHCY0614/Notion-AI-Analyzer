@@ -227,6 +227,18 @@ async function initialize() {
   return initializePromise;
 }
 
+function hasLeftoverCustomAnalysisPrompt(config) {
+  return Boolean(config?.analysisPromptCustomized) || Boolean(S.cleanText(config?.analysisPrompt));
+}
+
+function stripCustomAnalysisPrompt(config) {
+  return {
+    ...config,
+    analysisPrompt: "",
+    analysisPromptCustomized: false
+  };
+}
+
 async function readConfig() {
   const stored = await chrome.storage.local.get(CONFIG_KEY);
   const saved = stored[CONFIG_KEY] ?? {};
@@ -245,7 +257,13 @@ async function readConfig() {
   merged.preferExistingTopicsByDataSource = normalizeTopicOrganizerPreferences(
     merged.preferExistingTopicsByDataSource
   );
-  return merged;
+  if (hasLeftoverCustomAnalysisPrompt(merged)) {
+    customAnalysisPromptCleared = true;
+    const next = stripCustomAnalysisPrompt(merged);
+    await writeConfig(next);
+    return next;
+  }
+  return stripCustomAnalysisPrompt(merged);
 }
 
 function normalizeTopicDictionary(value) {
