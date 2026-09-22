@@ -337,20 +337,37 @@ async function requestTopicStandardMatches({ groups, standards, config, controll
         confidenceRank[match.confidence] ?? 0
       )];
       const themeName = S.cleanText(match.matched_topic);
-      const compareLabel = matchedExisting && themeName
-        ? `既有主題比對（${themeName}）`
-        : "既有主題比對";
-      const compareDetail = S.cleanText(match.reason)
-        || (matchedExisting && themeName
-          ? `建議沿用既有主題「${themeName}」。`
-          : "未找到合適的既有主題，保留第一階段建議名稱。");
-      const compareSegment = `${compareLabel}：${compareDetail}`;
+      const matchReason = S.cleanText(match.reason).replace(/『([^』]*)』/g, "「$1」");
+      if (matchedExisting) {
+        // Reuse: UI shows「既有主題」+ 說明. Skip redundant same-theme compare lines.
+        const strip = value => String(value || "")
+          .replace(/[「」『』《》【】（）()：:。.\s]/g, "")
+          .toLocaleLowerCase("zh-Hant-TW");
+        const themeKey = strip(themeName);
+        const reasonKey = strip(matchReason);
+        const redundant = !reasonKey
+          || (themeKey && (reasonKey === themeKey
+            || reasonKey === `既有主題${themeKey}`
+            || reasonKey === `建議沿用既有主題${themeKey}`
+            || reasonKey === `沿用既有主題${themeKey}`));
+        const reasonParts = [group.reason];
+        if (!redundant) reasonParts.push(matchReason);
+        return {
+          ...group,
+          standard_topic: match.matched_topic,
+          reason: reasonParts.filter(Boolean).join("；").slice(0, 500),
+          confidence,
+          existing: true
+        };
+      }
+      const compareDetail = matchReason || "未找到合適的既有主題，保留第一階段建議名稱。";
+      const compareSegment = `既有主題比對：${compareDetail}`;
       return {
         ...group,
-        standard_topic: matchedExisting ? match.matched_topic : group.standard_topic,
+        standard_topic: group.standard_topic,
         reason: [group.reason, compareSegment].filter(Boolean).join("；").slice(0, 500),
         confidence,
-        existing: matchedExisting
+        existing: false
       };
     }),
     warnings

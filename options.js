@@ -448,9 +448,16 @@ async function saveSettings(showConfirmation = true) {
   notionToken.placeholder = config.hasNotionToken ? "已設定（留白會保留）" : "secret_…";
   geminiKey.placeholder = config.hasGeminiKey ? "已設定（留白會保留）" : "AIza…";
   vertexKey.placeholder = config.hasVertexKey ? "已設定（留白會保留）" : "AIza…";
+  if (config.databaseChanged) {
+    organizerClearedForPendingDbChange = false;
+    organizerData = await send("GET_TOPIC_ORGANIZER");
+    renderOrganizer();
+  } else {
+    organizerClearedForPendingDbChange = false;
+  }
   if (showConfirmation) {
     const queueNotice = config.databaseChanged
-      ? ` 已切換資料庫${config.clearedQueueCount ? `，並清除 ${config.clearedQueueCount} 篇舊佇列` : ""}；開始前請掃描資料庫。`
+      ? ` 已切換資料庫${config.clearedQueueCount ? `，並清除 ${config.clearedQueueCount} 篇舊佇列` : ""}，並清除主題整理建議；開始前請掃描資料庫。`
       : "";
     showStatus(`設定已儲存。金鑰欄已清空顯示，但目前設定仍保留。${queueNotice}`, "success");
   }
@@ -511,6 +518,45 @@ function compactTargetId(value) {
   return compact.match(/[0-9a-f]{32}/i)?.[0]?.toLowerCase() || "";
 }
 
+let organizerClearedForPendingDbChange = false;
+
+async function refreshOrganizerAfterTargetChange() {
+  const nextId = compactTargetId(notionTarget.value);
+  const currentIds = savedTargetIds();
+  const changed = nextId ? !currentIds.includes(nextId) : currentIds.length > 0;
+  if (changed) {
+    if (!organizerClearedForPendingDbChange) {
+      organizerClearedForPendingDbChange = true;
+      organizerData = {
+        status: "cleared",
+        scannedAt: "",
+        candidateCount: 0,
+        occurrenceCount: 0,
+        pageCount: 0,
+        groups: [],
+        unclassified: [],
+        manualItems: [],
+        existingTopics: [],
+        appliedCount: 0,
+        skippedCount: 0,
+        warnings: [],
+        progress: null,
+        canRollback: Boolean(organizerData?.canRollback)
+      };
+      renderOrganizer();
+    }
+    return;
+  }
+  if (!organizerClearedForPendingDbChange) return;
+  organizerClearedForPendingDbChange = false;
+  try {
+    organizerData = await send("GET_TOPIC_ORGANIZER");
+    renderOrganizer();
+  } catch {
+    /* keep current organizer UI if reload fails */
+  }
+}
+
 notionTarget.addEventListener("input", () => {
   const key = compactTargetId(notionTarget.value);
   preferExistingTopics.checked = Boolean(key && topicOrganizerPreferences[key]);
@@ -519,6 +565,7 @@ notionTarget.addEventListener("input", () => {
   notionDataSourceSelect.value = matchingOption?.value || "";
   enhancedSelects.get(notionDataSourceSelect)?.sync();
   updateDatabaseChangeWarning();
+  void refreshOrganizerAfterTargetChange();
 });
 
 notionDataSourceSelect.addEventListener("change", () => {
@@ -747,9 +794,63 @@ function organizerSummaryText(unclassified) {
 }
 
 
-function formatOrganizerReasonText(raw) {
-  const body = String(raw || "未提供說明").trim() || "未提供說明";
-  return `建議說明：${body.replace(/；/g, "；\n")}`;
+function normalizeThemeNameQuotes(text) {
+  return String(text || "").replace(/『([^』]*)』/g, "「$1」");
+}
+
+function organizerReasonSegments(raw) {
+  return normalizeThemeNameQuotes(String(raw || "").trim())
+    .split("；")
+    .map(part => part.trim())
+    .filter(Boolean);
+}
+
+function isRedundantExistingCompare(themeName, detail) {
+  const strip = value => String(value || "")
+    .replace(/[「」『』《》【】（）()：:。.\s]/g, "")
+    .toLocaleLowerCase("zh-Hant-TW");
+  const theme = strip(themeName);
+  const body = strip(detail);
+  if (!body) return true;
+  if (theme && (body === theme || body === `既有主題${theme}` || body === `建議沿用既有主題${theme}` || body === `沿用既有主題${theme}`)) {
+    return true;
+  }
+  if (!theme && /^(建議)?沿用既有主題$/.test(body)) return true;
+  return false;
+}
+
+/**
+ * Formats organizer group reason for display. Prefer structured existing/
+ * comparison layout over a single「建議說明」prefix. Normalizes 『』 to 「」.
+ */
+function formatOrganizerReasonText(raw, group = {}) {
+  const segments = organizerReasonSegments(raw);
+  const explanations = [];
+  const comparisons = [];
+  let sawRedundantCompare = false;
+  for (const segment of segments) {
+    const match = segment.match(/^既有主題比對(?:（([^）]*)）)?：(.+)$/s);
+    if (!match) {
+      explanations.push(segment);
+      continue;
+    }
+    const labeledTheme = String(match[1] || "").trim();
+    const detail = String(match[2] || "").trim();
+    if (group.existing === true || isRedundantExistingCompare(labeledTheme, detail)) {
+      sawRedundantCompare = true;
+      continue;
+    }
+    comparisons.push(`既有主題比對：${detail}`);
+  }
+  const explanation = explanations.join("；") || "未提供說明";
+  const treatAsExisting = group.existing === true || (sawRedundantCompare && !comparisons.length);
+  if (treatAsExisting) {
+    return `既有主題\n說明：${explanation}`;
+  }
+  if (comparisons.length) {
+    return `說明：${explanation}\n${comparisons.join("\n")}`;
+  }
+  return `說明：${explanation}`;
 }
 
 function updateApplyProgressUi() {
@@ -815,7 +916,7 @@ function renderOrganizerGroupCard(group) {
   head.append(selected, name, confidence);
   const reason = document.createElement("p");
   reason.className = "hint topic-group-reason";
-  reason.textContent = formatOrganizerReasonText(group.reason || group.definition || "");
+  reason.textContent = formatOrganizerReasonText(group.reason || group.definition || "", group);
   const source = document.createElement("p");
   source.className = "topic-source";
   source.textContent = (group.aliases ?? []).length > 1

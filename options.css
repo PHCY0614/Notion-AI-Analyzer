@@ -507,12 +507,15 @@ input:focus, select:focus, textarea:focus { border-color: var(--green); box-shad
 .confirm-dialog::backdrop { background: rgba(18, 28, 22, .48); }
 .confirm-dialog__surface { display: grid; gap: 0; }
 .confirm-dialog__body { padding: 26px 26px 20px; }
-.confirm-dialog__body h2 { margin-bottom: 12px; }
+.confirm-dialog__body h2 {
+  margin-bottom: 12px;
+  font-weight: 700;
+}
 .confirm-dialog__body p { overflow-wrap: anywhere; }
 .confirm-dialog__message {
   margin: 0;
   font-size: 17px;
-  font-weight: 650;
+  font-weight: 400;
   line-height: 1.5;
 }
 .confirm-dialog__scope {
