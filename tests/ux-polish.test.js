@@ -60,19 +60,22 @@ function testThemeSuggestionFormatting() {
   assert.match(optionsJs, /topic-group-reason/);
   assert.match(optionsJs, /topic-group-reason__label/);
   assert.match(optionsJs, /既有主題\\n說明：/);
+  assert.match(optionsJs, /建議：/);
   assert.match(optionsJs, /createElement\("strong"\)/);
   assert.match(optionsJs, /refreshOrganizerAfterTargetChange/);
   assert.match(optionsJs, /config\.databaseChanged/);
   assert.match(optionsJs, /GET_TOPIC_ORGANIZER/);
+  assert.match(optionsJs, /已有經使用者確認的主題對照/);
   assert.match(optionsCss, /\.topic-group-reason \{[^}]*white-space:\s*pre-line;/s);
   assert.match(optionsCss, /\.topic-group-reason__label \{[^}]*font-weight:\s*700;/s);
-  assert.match(organizer, /既有主題比對：\$\{compareDetail\}/);
-  assert.match(organizer, /compareSegment/);
+  assert.match(organizer, /建議：\$\{/);
   assert.match(organizer, /existing: true/);
-  assert.doesNotMatch(organizer, /既有主題比對（\$\{themeName\}）/);
+  assert.doesNotMatch(organizer, /既有主題比對：/);
+  assert.doesNotMatch(organizer, /reason: `已有經使用者確認的主題對照/);
   assert.match(source("prompt.js"), /keep_proposed reasons must name the closest unsuitable existing topic/);
-  assert.match(source("prompt.js"), /Use 「」 around topic names, never 『』/);
-  assert.match(source("prompt.js"), /Do not write a self-comparison/);
+  assert.match(source("prompt.js"), /與既有主題「/);
+  assert.match(source("prompt.js"), /Use 「」 around topic names, never 『』|never 『』/);
+  assert.match(source("prompt.js"), /reuse_existing reasons must briefly explain why reuse is appropriate/);
 
   // Behavioral checks for display formatting.
   const start = optionsJs.indexOf("function normalizeThemeNameQuotes");
@@ -97,28 +100,81 @@ function testThemeSuggestionFormatting() {
   vm.createContext(sandbox);
   vm.runInContext(optionsJs.slice(start, end), sandbox);
 
-  // 1) Layout A — different existing theme → two lines, no「；」between
+  // 1) Layout A — different existing theme → 說明 + 建議；keep「與既有主題「…」」
   const layoutA = sandbox.formatOrganizerReasonText(
-    "皆與實際的旅遊經驗分享與行程攻略相關。；既有主題比對：與既有主題「生活日常」範圍不同，既有主題無法突顯旅遊攻略與行程經驗分享的專門檢索範疇。",
-    { existing: false, standardTopic: "旅遊攻略" }
+    "兩者皆與服飾穿著的實用指南及美學欣賞直接相關。；既有主題比對：與既有主題「生活日常」範圍不同，專注於服飾穿著的實用指南及美學欣賞。",
+    { existing: false, standardTopic: "穿搭美學" }
   );
   assert.equal(
     layoutA,
-    "說明：皆與實際的旅遊經驗分享與行程攻略相關。\n既有主題比對：與既有主題「生活日常」範圍不同，既有主題無法突顯旅遊攻略與行程經驗分享的專門檢索範疇。"
+    "說明：兩者皆與服飾穿著的實用指南及美學欣賞直接相關。\n建議：與既有主題「生活日常」範圍不同，專注於服飾穿著的實用指南及美學欣賞。"
   );
   assert.doesNotMatch(layoutA, /；/);
+  assert.doesNotMatch(layoutA, /既有主題比對/);
+  assert.match(layoutA, /與既有主題「生活日常」/);
 
-  // 2) Layout B — same theme as compared existing →「既有主題」+「說明」only
+  // 1b) already using「建議：」prefix
+  assert.equal(
+    sandbox.formatOrganizerReasonText(
+      "皆與實際的旅遊經驗分享與行程攻略相關。；建議：與既有主題「生活日常」範圍不同，既有主題無法突顯旅遊攻略與行程經驗分享的專門檢索範疇。",
+      { existing: false, standardTopic: "旅遊攻略" }
+    ),
+    "說明：皆與實際的旅遊經驗分享與行程攻略相關。\n建議：與既有主題「生活日常」範圍不同，既有主題無法突顯旅遊攻略與行程經驗分享的專門檢索範疇。"
+  );
+
+  // 2) Layout B — reuse: bold 既有主題 + stage-1 說明; drop stage-2 fluff
   const layoutB = sandbox.formatOrganizerReasonText(
-    "皆探討社會階層、貧富差距與貴族現象等社會結構議題。；既有主題比對：與既有主題「社會觀察」範圍相符，可沿用既有主題。",
+    "皆探討社會階層結構、貴族現象與階級帶來的差異。；既有主題比對：與既有主題「社會觀察」範圍相符，可沿用既有主題。",
     { existing: false, standardTopic: "社會觀察" }
   );
   assert.equal(
     layoutB,
-    "既有主題\n說明：皆探討社會階層、貧富差距與貴族現象等社會結構議題。"
+    "既有主題\n說明：皆探討社會階層結構、貴族現象與階級帶來的差異。"
   );
   assert.doesNotMatch(layoutB, /既有主題比對/);
   assert.doesNotMatch(layoutB, /；/);
+  assert.doesNotMatch(layoutB, /建議：/);
+
+  // 2b) messy user reports — first content segment only
+  assert.equal(
+    sandbox.formatOrganizerReasonText(
+      "皆探討社會階層結構、貴族現象與階級帶來的差異。；探討社會階層結構、貴族現象與階級帶來的差異，符合社會現象與結構的觀察範疇。",
+      { existing: true, standardTopic: "社會觀察" }
+    ),
+    "既有主題\n說明：皆探討社會階層結構、貴族現象與階級帶來的差異。"
+  );
+  assert.equal(
+    sandbox.formatOrganizerReasonText(
+      "這些主題皆環繞著人際互動與情感交流。；涵蓋人與人之間的互動與情感，與該主題的檢索範圍相符。",
+      { existing: true, standardTopic: "人際關係" }
+    ),
+    "既有主題\n說明：這些主題皆環繞著人際互動與情感交流。"
+  );
+
+  // 2c) genuine stage-2 reuse rationale is kept as 建議
+  assert.equal(
+    sandbox.formatOrganizerReasonText(
+      "皆探討社會階層結構、貴族現象與階級帶來的差異。；建議：讀者會以社會結構與階級關鍵字找到這批文章，與既有主題「社會觀察」的用途相符。",
+      { existing: false, standardTopic: "社會觀察" }
+    ),
+    "既有主題\n說明：皆探討社會階層結構、貴族現象與階級帶來的差異。\n建議：讀者會以社會結構與階級關鍵字找到這批文章，與既有主題「社會觀察」的用途相符。"
+  );
+
+  // 2d) confirmed-mapping boilerplate must never be 說明/建議
+  assert.equal(
+    sandbox.formatOrganizerReasonText(
+      "已有經使用者確認的主題對照「兩性情感」。",
+      { existing: true, standardTopic: "兩性情感", definition: "探討兩性之間的情感互動、親密關係與溝通模式。" }
+    ),
+    "既有主題\n說明：探討兩性之間的情感互動、親密關係與溝通模式。"
+  );
+  assert.doesNotMatch(
+    sandbox.formatOrganizerReasonText(
+      "已有經使用者確認的主題對照「兩性情感」。",
+      { existing: true, standardTopic: "兩性情感" }
+    ),
+    /已有經使用者確認/
+  );
 
   assert.equal(
     sandbox.formatOrganizerReasonText("日常紀錄；既有主題比對（生活日常）：生活日常", { existing: true }),
@@ -126,7 +182,7 @@ function testThemeSuggestionFormatting() {
   );
   assert.equal(
     sandbox.formatOrganizerReasonText("偏旅行規劃；既有主題比對：與既有主題『旅行』範圍不同", { existing: false, standardTopic: "旅行規劃" }),
-    "說明：偏旅行規劃\n既有主題比對：與既有主題「旅行」範圍不同"
+    "說明：偏旅行規劃\n建議：與既有主題「旅行」範圍不同"
   );
   assert.equal(
     sandbox.formatOrganizerReasonText("既有主題比對（生活日常）：生活日常", {}),

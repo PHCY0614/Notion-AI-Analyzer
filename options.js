@@ -817,10 +817,33 @@ function extractComparedThemeNames(detail, labeledTheme = "") {
   const labeled = String(labeledTheme || "").trim();
   if (labeled) names.push(labeled);
   const text = normalizeThemeNameQuotes(detail);
-  for (const match of text.matchAll(/既有主題「([^」]+)」/g)) {
+  for (const match of text.matchAll(/(?:既有主題)?「([^」]+)」/g)) {
     names.push(String(match[1] || "").trim());
   }
   return [...new Set(names.filter(Boolean))];
+}
+
+/** Layout A suggestion detail: normalize quotes only; keep「與既有主題「X」」. */
+function normalizeSuggestionDetail(detail) {
+  return normalizeThemeNameQuotes(detail).trim();
+}
+
+/** Trailing reuse / same-theme restatement after「；」(Layout B defense). */
+function isReuseRestatementSegment(segment) {
+  const text = normalizeThemeNameQuotes(segment).replace(/^說明：/, "").trim();
+  if (!text) return true;
+  return /符合[^；]{0,40}範疇|與該主題[^；]{0,40}相符|範圍相符|範圍相同|範圍一致|建議沿用|可以沿用|沿用既有主題|檢索範圍相符/.test(text);
+}
+
+/** Process/meta copy — must never appear as Layout B 說明. */
+function isConfirmedMappingBoilerplate(segment) {
+  const text = normalizeThemeNameQuotes(String(segment || "")).replace(/^說明：/, "").trim();
+  return /已有經使用者確認的主題對照/.test(text);
+}
+
+/** True when a segment is unsuitable as theme-content 說明 for Layout B. */
+function isNonContentExplanation(segment) {
+  return isConfirmedMappingBoilerplate(segment) || isReuseRestatementSegment(segment);
 }
 
 function isRedundantExistingCompare(themeName, detail) {
@@ -846,53 +869,83 @@ function isSameThemeComparison(proposedName, labeledTheme, detail) {
 function isSelfCompareExplanation(proposedName, segment) {
   const text = normalizeThemeNameQuotes(segment);
   if (isRedundantExistingCompare(proposedName, text)) return true;
+  // Fit/restatement clauses with no different-theme quote (Layout B leftovers).
+  if (isReuseRestatementSegment(text) && !/「[^」]+」/.test(text)) return true;
   if (!themeNameKey(proposedName)) return false;
   if (!isSameThemeComparison(proposedName, "", text)) return false;
-  return /範圍相符|範圍相同|範圍一致|建議沿用|可以沿用|沿用既有主題/.test(text)
-    || /^與既有主題「[^」]+」/.test(text);
+  return /範圍相符|範圍相同|範圍一致|建議沿用|可以沿用|沿用既有主題|符合[^；]{0,40}範疇|與該主題[^；]{0,40}相符|檢索範圍相符/.test(text)
+    || /^與(?:既有主題)?「[^」]+」/.test(text);
 }
 
 /**
  * Formats organizer group reason for display. Prefer structured existing/
  * comparison layout over a single「建議說明」prefix. Normalizes 『』 to 「」.
- * Never leaves 說明 + 既有主題比對 on one line joined by「；」.
+ * Never leaves 說明 + 建議 on one line joined by「；」. Stage-2 label is「建議：」(legacy「既有主題比對：」still parsed).
  */
 function formatOrganizerReasonText(raw, group = {}) {
   const proposedName = String(group.standardTopic || group.standard_topic || "").trim();
   const segments = organizerReasonSegments(raw);
   const explanations = [];
-  const comparisons = [];
+  const diffSuggestions = [];
+  const reuseSuggestions = [];
   let sawSameThemeCompare = false;
   for (const segment of segments) {
-    const match = segment.match(/^既有主題比對(?:（([^）]*)）)?：(.+)$/s);
+    // Accept「建議：」(current) and legacy「既有主題比對：」from stored suggestions.
+    const match = segment.match(/^(?:建議|既有主題比對)(?:（([^）]*)）)?：(.+)$/s);
     if (!match) {
+      if (isConfirmedMappingBoilerplate(segment)) {
+        continue;
+      }
       if (isSelfCompareExplanation(proposedName, segment)) {
         sawSameThemeCompare = true;
         continue;
       }
-      explanations.push(segment.replace(/^說明：/, "").trim());
+      explanations.push(segment.replace(/^(?:說明|建議)：/, "").trim());
       continue;
     }
     const labeledTheme = String(match[1] || "").trim();
-    const detail = String(match[2] || "").trim();
-    if (
-      group.existing === true
-      || isRedundantExistingCompare(labeledTheme || proposedName, detail)
-      || isSameThemeComparison(proposedName, labeledTheme, detail)
-    ) {
+    const detail = normalizeSuggestionDetail(match[2] || "");
+    if (isConfirmedMappingBoilerplate(detail) || isRedundantExistingCompare(labeledTheme || proposedName, detail)) {
       sawSameThemeCompare = true;
       continue;
     }
-    comparisons.push(`既有主題比對：${detail}`);
+    const sameTheme = group.existing === true
+      || isSameThemeComparison(proposedName, labeledTheme, detail);
+    if (sameTheme) {
+      sawSameThemeCompare = true;
+      // Layout B stage-2: keep only a genuine reuse rationale; drop scope-fluff restatements.
+      if (!isReuseRestatementSegment(detail) && !isSelfCompareExplanation(proposedName, detail)) {
+        reuseSuggestions.push(`建議：${detail}`);
+      }
+      continue;
+    }
+    diffSuggestions.push(`建議：${detail}`);
   }
-  const explanation = explanations.filter(Boolean).join("；") || "未提供說明";
   const treatAsExisting = group.existing === true
-    || (sawSameThemeCompare && !comparisons.length);
+    || (sawSameThemeCompare && !diffSuggestions.length)
+    || (reuseSuggestions.length && !diffSuggestions.length);
+  const cleanExplanations = explanations.filter(Boolean);
+  const definition = String(group.definition || "").trim();
+  let explanation = cleanExplanations.find(part => !isNonContentExplanation(part))
+    || (definition && !isConfirmedMappingBoilerplate(definition) ? definition : "")
+    || "未提供說明";
+  // Layout B: stage-1 說明 only as first content line; optional non-redundant 建議.
   if (treatAsExisting) {
-    return `既有主題\n說明：${explanation}`;
+    // Prefer the first content explanation only (drop「；」joined restatements).
+    const stage1 = cleanExplanations.find(part => !isNonContentExplanation(part));
+    explanation = stage1
+      || (definition && !isConfirmedMappingBoilerplate(definition) ? definition : "")
+      || "未提供說明";
+    const suggestion = reuseSuggestions[0] || "";
+    return suggestion
+      ? `既有主題\n說明：${explanation}\n${suggestion}`
+      : `既有主題\n說明：${explanation}`;
   }
-  if (comparisons.length) {
-    return `說明：${explanation}\n${comparisons.join("\n")}`;
+  // Layout A: 說明 + 建議 (different existing theme). Keep「與既有主題「X」」.
+  explanation = cleanExplanations.filter(part => !isNonContentExplanation(part)).join("；")
+    || explanation;
+  if (diffSuggestions.length) {
+    return `說明：${explanation}\n${diffSuggestions.join("\n")}`;
   }
   return `說明：${explanation}`;
 }

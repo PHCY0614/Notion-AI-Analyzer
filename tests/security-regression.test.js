@@ -124,7 +124,7 @@ function testRepositoryGuards() {
 
   const normalizedPrompt = source("prompt.js").replace(/\r\n/g, "\n");
   const promptHash = crypto.createHash("sha256").update(normalizedPrompt).digest("hex").toUpperCase();
-  assert.equal(promptHash, "6C39CAD563F74BD43830A2002D4EF94CA8E55DB36D80B87ABB45C843D0702105");
+  assert.equal(promptHash, "E28A1F8D044A4787478C3978B7DA9F65D30E83397A096C69B271E22C70E06A98");
 }
 
 function testAdvancedSettingsHidePromptControls() {
