@@ -50,6 +50,7 @@
           <span>記住在這台電腦</span>
         </label>
         <p class="hint">未勾選時只保留到瀏覽器完全關閉。勾選後會存於 Chrome 擴充功能的本機儲存空間，不是加密保險箱。</p>
+        <p class="hint" role="note">使用擴充功能時請在瀏覽器開啟 Notion 網頁版（notion.so 分頁）；Notion 桌面應用程式不受支援。</p>
 
         <div class="notion-picker-actions">
           <button id="load-notion-data-sources" class="button secondary" type="button">載入可用資料庫</button>
@@ -156,6 +157,7 @@
           </div>
         </div>
         <p class="hint">按「測試連線並準備欄位」會補齊缺少的欄位；缺少「整理狀態」時會先詢問，接著請在 Notion 把文章標成「待分析」，才能開始整理。分析後工具會先寫暫定主題，正式主題須你確認整理後才寫入。</p>
+        <p id="fields-view-tip" class="hint" role="note">新欄位可能在既有資料庫檢視中被隱藏；請到 Notion 把需要的欄位顯示出來。</p>
         <div class="field-grid" aria-label="工具會用到的欄位">
           <span><b>AI 標題</b></span>
           <span><b>AI 主題</b></span>
@@ -219,6 +221,12 @@
           <button id="rollback-topics" class="button danger" type="button" disabled>回復上一次套用</button>
         </div>
         <p id="organizer-summary" class="hint">尚未產生建議。</p>
+        <div id="apply-progress" class="apply-progress" hidden>
+          <div class="apply-progress__track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-labelledby="apply-progress-label">
+            <div id="apply-progress-fill" class="apply-progress__fill"></div>
+          </div>
+          <p id="apply-progress-label" class="apply-progress__label">正在寫入 Notion…</p>
+        </div>
         <div id="topic-groups" class="topic-groups"></div>
         <details id="unclassified-panel" class="unclassified-panel" hidden>
           <summary id="unclassified-summary">本輪未分類</summary>
@@ -292,7 +300,7 @@
     <form method="dialog" class="confirm-dialog__surface">
       <div class="confirm-dialog__body">
         <h2 id="notion-status-dialog-title">準備 Notion 整理狀態</h2>
-        <p id="notion-status-dialog-message"></p>
+        <p id="notion-status-dialog-message" class="confirm-dialog__message"></p>
         <p id="notion-status-dialog-scope" class="confirm-dialog__scope">只會新增或補齊「整理狀態」這個欄位及分析流程需要的狀態選項；既有欄位、既有選項與文章內容都會保留。</p>
       </div>
       <div class="confirm-dialog__actions">

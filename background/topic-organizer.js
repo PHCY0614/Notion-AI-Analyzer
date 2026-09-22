@@ -336,10 +336,19 @@ async function requestTopicStandardMatches({ groups, standards, config, controll
         confidenceRank[group.confidence] ?? 0,
         confidenceRank[match.confidence] ?? 0
       )];
+      const themeName = S.cleanText(match.matched_topic);
+      const compareLabel = matchedExisting && themeName
+        ? `既有主題比對（${themeName}）`
+        : "既有主題比對";
+      const compareDetail = S.cleanText(match.reason)
+        || (matchedExisting && themeName
+          ? `建議沿用既有主題「${themeName}」。`
+          : "未找到合適的既有主題，保留第一階段建議名稱。");
+      const compareSegment = `${compareLabel}：${compareDetail}`;
       return {
         ...group,
         standard_topic: matchedExisting ? match.matched_topic : group.standard_topic,
-        reason: uniqueTopicNames([group.reason, `既有主題比對：${match.reason}`]).join("；").slice(0, 500),
+        reason: [group.reason, compareSegment].filter(Boolean).join("；").slice(0, 500),
         confidence,
         existing: matchedExisting
       };
@@ -591,6 +600,7 @@ function mergeDictionaryEntries(existing, additions) {
     map.set(key, previous ? {
       ...previous,
       ...addition,
+      definition: S.cleanText(addition.definition) || previous.definition || "",
       aliases: uniqueTopicNames([...(previous.aliases ?? []), ...(addition.aliases ?? [])])
     } : addition);
   }
@@ -619,10 +629,15 @@ async function applyTopicOrganizerGroups(groupsInput = []) {
     const aliases = uniqueTopicNames(group.selectedAliases ?? [])
       .map(name => allowedAliases.get(N.topicKey(name)) || "")
       .filter(Boolean);
+    const standardTopic = S.cleanText(group.standardTopic).slice(0, 100);
+    const definition = S.cleanText(group.definition)
+      || S.cleanText(stored?.definition)
+      || S.cleanText(stored?.reason)
+      || (standardTopic ? `由主題整理套用建立的對照「${standardTopic}」。` : "");
     return {
       id,
-      standardTopic: S.cleanText(group.standardTopic).slice(0, 100),
-      definition: S.cleanText(group.definition).slice(0, 500),
+      standardTopic,
+      definition: definition.slice(0, 500),
       aliases
     };
   }).filter(group => group.id && group.standardTopic && group.aliases.length);
@@ -759,6 +774,13 @@ async function applyTopicOrganizerGroups(groupsInput = []) {
     stateCache.topicRollback = snapshot;
     organizer.status = "applied";
     organizer.progress = { done: affectedPages.length, total: affectedPages.length };
+    try {
+      options = validTopicOptions(await readTopicOptions(config, token));
+    } catch { /* keep last options */ }
+    organizer.existingTopics = uniqueTopicNames([
+      ...(options ?? []).map(option => option.name),
+      ...selected.map(group => group.standardTopic)
+    ]);
     const appliedById = new Map(selected.map(group => [group.id, group]));
     const appliedAliasKeys = new Set(selected.flatMap(group => group.aliases).map(N.topicKey));
     organizer.appliedCandidateCount = (Number(organizer.appliedCandidateCount) || 0) + appliedAliasKeys.size;
@@ -787,6 +809,10 @@ async function applyTopicOrganizerGroups(groupsInput = []) {
       stateCache.topicRollback = snapshot;
     }
     organizer.status = "error";
+    organizer.existingTopics = uniqueTopicNames([
+      ...(organizer.existingTopics ?? []),
+      ...selected.map(group => group.standardTopic)
+    ]);
     stateCache.mode = organizer.previousMode || "idle";
     stateCache.lastError = isAbort(error)
       ? "主題套用已停止；可重新按套用安全續跑，或回復上一次。"

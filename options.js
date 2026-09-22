@@ -32,7 +32,12 @@ const outputSpecSummary = document.querySelector("#output-spec-summary");
 const requestTimeout = document.querySelector("#request-timeout");
 const preferExistingTopics = document.querySelector("#prefer-existing-topics");
 const organizerSummary = document.querySelector("#organizer-summary");
+const applyProgress = document.querySelector("#apply-progress");
+const applyProgressFill = document.querySelector("#apply-progress-fill");
+const applyProgressLabel = document.querySelector("#apply-progress-label");
+const applyProgressTrack = applyProgress?.querySelector(".apply-progress__track");
 const topicGroups = document.querySelector("#topic-groups");
+const applyTopicsButton = document.querySelector("#apply-topics");
 const unclassifiedPanel = document.querySelector("#unclassified-panel");
 const unclassifiedSummary = document.querySelector("#unclassified-summary");
 const unclassifiedTopics = document.querySelector("#unclassified-topics");
@@ -580,7 +585,10 @@ testButton.addEventListener("click", async () => {
       : "";
     const providerName = result.provider === "vertex" ? "Vertex AI" : "Google AI Studio";
     const pendingNote = result.hasPending ? "" : ` ${NO_PENDING_MESSAGE}`;
-    showStatus(`連線成功。${changes}；目前有 ${result.topicCount} 個可用 AI 主題${ignoredNote}；${providerName} ${modelNote}。${pendingNote}`, result.selectedAvailable && result.hasPending ? "success" : "info");
+    const fieldTip = (statusPreparation?.created || statusPreparation?.changed || result.addedProperties.length || result.updatedProperties.length)
+      ? " 若看不到新建欄位，請到 Notion 既有資料庫檢視中把它們顯示出來。"
+      : "";
+    showStatus(`連線成功。${changes}；目前有 ${result.topicCount} 個可用 AI 主題${ignoredNote}；${providerName} ${modelNote}。${pendingNote}${fieldTip}`, result.selectedAvailable && result.hasPending ? "success" : "info");
   } catch (error) {
     showStatus(error.message, "error");
   } finally {
@@ -738,6 +746,36 @@ function organizerSummaryText(unclassified) {
   return text;
 }
 
+
+function formatOrganizerReasonText(raw) {
+  const body = String(raw || "未提供說明").trim() || "未提供說明";
+  return `建議說明：${body.replace(/；/g, "；\n")}`;
+}
+
+function updateApplyProgressUi() {
+  if (!applyProgress) return;
+  const applying = organizerData?.status === "applying";
+  const progress = organizerData?.progress;
+  const total = Number(progress?.total) || 0;
+  const done = Number(progress?.done) || 0;
+  if (!applying && !(progress && total > 0 && done < total && organizerData?.status === "error")) {
+    applyProgress.hidden = true;
+    return;
+  }
+  applyProgress.hidden = false;
+  const percent = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : (applying ? 5 : 0);
+  if (applyProgressFill) applyProgressFill.style.width = `${percent}%`;
+  if (applyProgressTrack) {
+    applyProgressTrack.setAttribute("aria-valuenow", String(percent));
+    applyProgressTrack.setAttribute("aria-valuemax", "100");
+  }
+  if (applyProgressLabel) {
+    applyProgressLabel.textContent = total > 0
+      ? `正在寫入 Notion… ${done}／${total}`
+      : "正在寫入 Notion…";
+  }
+}
+
 function updateRollbackButton() {
   document.querySelector("#rollback-topics").disabled = !organizerData?.canRollback;
 }
@@ -776,8 +814,8 @@ function renderOrganizerGroupCard(group) {
   confidence.textContent = `${group.confidence === "high" ? "高" : group.confidence === "medium" ? "中" : "低"}信心`;
   head.append(selected, name, confidence);
   const reason = document.createElement("p");
-  reason.className = "hint";
-  reason.textContent = `建議說明：${group.reason || group.definition || "未提供說明"}`;
+  reason.className = "hint topic-group-reason";
+  reason.textContent = formatOrganizerReasonText(group.reason || group.definition || "");
   const source = document.createElement("p");
   source.className = "topic-source";
   source.textContent = (group.aliases ?? []).length > 1
@@ -843,11 +881,13 @@ function renderOrganizer() {
   renderManualReviewPanel(manualItems);
   if (!organizerData?.groups?.length) {
     organizerSummary.textContent = organizerSummaryText(unclassified);
+    updateApplyProgressUi();
     updateRollbackButton();
     return;
   }
   organizerSummary.textContent = organizerSummaryText(unclassified);
   topicGroups.append(...organizerData.groups.map(group => renderOrganizerGroupCard(group)));
+  updateApplyProgressUi();
   updateRollbackButton();
 }
 
@@ -908,16 +948,40 @@ document.querySelector("#apply-topics").addEventListener("click", async () => {
   const candidateCount = selectedGroups.reduce((total, group) => total + group.selectedAliases.length, 0);
   if (!count) return showStatus("請先勾選至少一組建議，並保留至少一個暫定主題。", "error");
   if (!confirm(`確定套用 ${count} 組、共 ${candidateCount} 個暫定主題嗎？工具會批次更新受影響頁面，並保留可回復快照。`)) return;
+  const draftGroups = organizerData.groups;
+  let pollTimer = 0;
   try {
-    organizerData.status = "applying";
+    if (applyTopicsButton) applyTopicsButton.disabled = true;
+    organizerData = {
+      ...organizerData,
+      status: "applying",
+      progress: { done: 0, total: Math.max(1, Number(organizerData.pageCount) || candidateCount) }
+    };
     renderOrganizer();
-    organizerData = await send("APPLY_TOPIC_GROUPS", { groups: organizerData.groups });
+    showStatus("正在把已勾選主題寫入 Notion…", "info");
+    pollTimer = window.setInterval(() => {
+      void send("GET_TOPIC_ORGANIZER").then(live => {
+        if (!live) return;
+        organizerData = live;
+        renderOrganizer();
+      }).catch(() => {});
+    }, 450);
+    organizerData = await send("APPLY_TOPIC_GROUPS", { groups: draftGroups });
     renderOrganizer();
     showStatus(
       organizerData.status === "applied" ? "已套用主題對照並更新本機字典。" : "尚未完成，可重新套用或回復。",
       organizerData.status === "applied" ? "success" : "info"
     );
-  } catch (error) { showStatus(error.message, "error"); }
+  } catch (error) {
+    try {
+      organizerData = await send("GET_TOPIC_ORGANIZER") || organizerData;
+      renderOrganizer();
+    } catch { /* keep last local organizerData */ }
+    showStatus(error.message, "error");
+  } finally {
+    if (pollTimer) window.clearInterval(pollTimer);
+    if (applyTopicsButton) applyTopicsButton.disabled = false;
+  }
 });
 document.querySelector("#clear-topic-suggestions").addEventListener("click", async () => {
   if (!organizerData || !confirm("確定清除目前的主題整理建議嗎？這不會刪除 Notion 主題、不會改動文章，也不會清除本機主題字典。")) return;

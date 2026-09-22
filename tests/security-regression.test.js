@@ -124,7 +124,7 @@ function testRepositoryGuards() {
 
   const normalizedPrompt = source("prompt.js").replace(/\r\n/g, "\n");
   const promptHash = crypto.createHash("sha256").update(normalizedPrompt).digest("hex").toUpperCase();
-  assert.equal(promptHash, "22C652000655892B43B3F7FD5F4E01AB170AAD44B660FC53FD592479E593CF50");
+  assert.equal(promptHash, "C7F35AAE1DF91263207E3ECCBF85091E0FC81EE8D16117B163A9902B8D86940A");
 }
 
 function testAdvancedSettingsHidePromptControls() {
@@ -164,16 +164,22 @@ function testBatchAiConfirmHelper() {
   const popup = source("popup.js");
   assert.match(popup, /function confirmBatchAiSend\(/);
   assert.match(popup, /function batchAiSendConfirmMessage\(/);
-  assert.match(popup, /佇列中的待處理／失敗頁面/);
+  assert.match(popup, /即將分析約 \$\{count\} 頁/);
+  assert.match(popup, /文字會傳送到你選擇的 Google AI/);
   assert.match(popup, /未付費的 AI Studio 可能將內容用於改善產品/);
+  assert.match(popup, /RETRY_FAILED is not gated/);
   assert.equal(
     (popup.match(/confirmBatchAiSend\(/g) || []).length,
-    3,
-    "ANALYZE_ALL and RETRY_FAILED must share one confirm helper"
+    2,
+    "ANALYZE_ALL uses confirm helper; RETRY_FAILED must not"
   );
   assert.match(popup, /SCAN_PENDING/);
   const scanHandler = popup.slice(popup.indexOf("buttons.scan.addEventListener"), popup.indexOf("buttons.queueControl.addEventListener"));
   assert.doesNotMatch(scanHandler, /confirmBatchAiSend/);
+  const retryHandler = popup.slice(popup.indexOf("buttons.retry.addEventListener"), popup.indexOf("buttons.approveTopic.addEventListener"));
+  assert.doesNotMatch(retryHandler, /confirmBatchAiSend/);
+  assert.match(source("popup.html"), /id="batch-ai-dialog"/);
+  assert.match(source("popup.css"), /max-width:\s*366px/);
 }
 
 function testCustomSelectArrow() {

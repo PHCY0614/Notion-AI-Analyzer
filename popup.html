@@ -95,6 +95,18 @@
 
     <footer>文章分析只寫入標題、摘要、關鍵字與暫定主題；最終主題由單篇確認或批次整理另外處理。</footer>
   </main>
+  <dialog id="batch-ai-dialog" class="confirm-dialog" aria-labelledby="batch-ai-dialog-title" aria-describedby="batch-ai-dialog-message">
+    <form method="dialog" class="confirm-dialog__surface">
+      <div class="confirm-dialog__body">
+        <h2 id="batch-ai-dialog-title">確認傳送至 Google AI</h2>
+        <p id="batch-ai-dialog-message" class="confirm-dialog__message"></p>
+      </div>
+      <div class="confirm-dialog__actions">
+        <button id="batch-ai-cancel" class="button secondary" type="submit" value="cancel" autofocus>取消</button>
+        <button class="button primary" type="submit" value="confirm">確定繼續</button>
+      </div>
+    </form>
+  </dialog>
   <script src="shared.js"></script>
   <script src="ui-select.js"></script>
   <script src="popup.js"></script>

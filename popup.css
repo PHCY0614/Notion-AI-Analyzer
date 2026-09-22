@@ -310,3 +310,35 @@ button { font: inherit; }
 .copy-log { background: #eef3f7; color: #385168; }
 
 footer { margin-top: 16px; color: var(--muted); font-size: 10px; line-height: 1.45; text-align: center; }
+
+
+.confirm-dialog {
+  width: min(100%, calc(100vw - 24px));
+  max-width: 366px;
+  margin: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: var(--panel, #fff);
+  color: var(--ink, #17211b);
+  box-shadow: 0 18px 50px rgba(15, 35, 23, .28);
+}
+.confirm-dialog::backdrop { background: rgba(18, 28, 22, .48); }
+.confirm-dialog__surface { display: grid; gap: 0; }
+.confirm-dialog__body { padding: 18px 16px 14px; }
+.confirm-dialog__body h2 { margin: 0 0 10px; font-size: 15px; }
+.confirm-dialog__message {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.confirm-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--line, #e5e0d0);
+}
+.confirm-dialog__actions .button { min-height: 36px; padding: 7px 12px; font-size: 12px; }
