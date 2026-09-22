@@ -341,11 +341,20 @@ async function requestTopicStandardMatches({ groups, standards, config, controll
       if (matchedExisting) {
         // Reuse: UI shows「既有主題」+ 說明. Skip redundant same-theme compare lines.
         const strip = value => String(value || "")
+          .normalize("NFKC")
           .replace(/[「」『』《》【】（）()：:。.\s]/g, "")
           .toLocaleLowerCase("zh-Hant-TW");
         const themeKey = strip(themeName);
         const reasonKey = strip(matchReason);
+        const quotedThemes = [...String(matchReason || "").matchAll(/既有主題「([^」]+)」/g)]
+          .map(item => strip(item[1]));
+        const mentionsMatchedOnly = Boolean(themeKey)
+          && quotedThemes.length > 0
+          && quotedThemes.every(key => key === themeKey);
+        const selfCompare = mentionsMatchedOnly
+          && /範圍相符|範圍相同|範圍一致|建議沿用|可以沿用|沿用既有主題/.test(matchReason);
         const redundant = !reasonKey
+          || selfCompare
           || (themeKey && (reasonKey === themeKey
             || reasonKey === `既有主題${themeKey}`
             || reasonKey === `建議沿用既有主題${themeKey}`
@@ -356,6 +365,27 @@ async function requestTopicStandardMatches({ groups, standards, config, controll
           ...group,
           standard_topic: match.matched_topic,
           reason: reasonParts.filter(Boolean).join("；").slice(0, 500),
+          confidence,
+          existing: true
+        };
+      }
+      // keep_proposed: if the model compared against the proposed name itself, do not emit 比對.
+      const proposedName = S.cleanText(group.standard_topic);
+      const stripKeep = value => String(value || "")
+        .normalize("NFKC")
+        .replace(/[「」『』《》【】（）()：:。.\s]/g, "")
+        .toLocaleLowerCase("zh-Hant-TW");
+      const proposedKey = stripKeep(proposedName);
+      const keepQuoted = [...String(matchReason || "").matchAll(/既有主題「([^」]+)」/g)]
+        .map(item => stripKeep(item[1]));
+      const sameAsProposed = Boolean(proposedKey)
+        && keepQuoted.length > 0
+        && keepQuoted.every(key => key === proposedKey);
+      if (sameAsProposed) {
+        return {
+          ...group,
+          standard_topic: group.standard_topic,
+          reason: String(group.reason || "").slice(0, 500),
           confidence,
           existing: true
         };

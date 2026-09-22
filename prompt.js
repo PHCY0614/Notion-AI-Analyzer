@@ -175,7 +175,7 @@ RULES
 - reuse_existing is allowed only when one supplied existing AI topic covers the group's retrieval scope under the rules below. matched_topic must then exactly copy that existing topic name.
 - keep_proposed means no supplied existing AI topic is suitable. matched_topic must then be an empty string.
 - keep_proposed reasons must name the closest unsuitable existing topic or topics in Traditional Chinese (Taiwan), e.g. 與既有主題「旅行」範圍不同; when several were close, list each name clearly. Use 「」 around topic names, never 『』.
-- reuse_existing reasons must name that exact matched_topic.
+- reuse_existing reasons must briefly explain why the group's content fits the matched topic's retrieval scope in Traditional Chinese (this becomes the 說明 line). Do not write a self-comparison such as 與既有主題「X」範圍相符 when matched_topic is X; the UI already labels reuse as 既有主題.
 - When existing-topic priority mode is off, reuse only for substantially the same retrieval scope. A merely broader, narrower, parent, child, related, or same-field topic is not the same scope.
 - When existing-topic priority mode is on, follow its broader reasonable-coverage rule, but never reuse a topic that would materially mislead retrieval.
 - A stylistic wording preference alone is not a reason to replace an adequate proposed name with an existing topic of different scope.

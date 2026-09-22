@@ -369,6 +369,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--green); box-shad
 .topic-group-reason {
   white-space: pre-line;
 }
+.topic-group-reason__label {
+  font-weight: 700;
+}
 .apply-progress {
   display: grid;
   gap: 8px;
