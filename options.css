@@ -514,7 +514,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--green); box-shad
 .confirm-dialog__body p { overflow-wrap: anywhere; }
 .confirm-dialog__message {
   margin: 0;
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 400;
   line-height: 1.5;
 }
