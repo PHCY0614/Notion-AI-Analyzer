@@ -137,7 +137,10 @@ function mergeOrganizerGroups(inputGroups = []) {
     const group = grouped.get(key);
     group.aliases.push(...sources);
     group.keep_separate.push(...(input.keep_separate ?? input.keepSeparate ?? []));
-    if (S.cleanText(input.reason)) group.reasons.push(S.cleanText(input.reason));
+    const mergedReason = S.cleanText(input.reason);
+    if (mergedReason && !/已有經使用者確認的主題對照/.test(mergedReason)) {
+      group.reasons.push(mergedReason);
+    }
     group.existing = group.existing || input.existing === true;
     group.confirmed = group.confirmed || input.confirmed === true;
     if (!group.definition && input.definition) group.definition = S.cleanText(input.definition);
@@ -339,32 +342,47 @@ async function requestTopicStandardMatches({ groups, standards, config, controll
       const themeName = S.cleanText(match.matched_topic);
       const matchReason = S.cleanText(match.reason).replace(/『([^』]*)』/g, "「$1」");
       if (matchedExisting) {
-        // Reuse: UI shows「既有主題」+ 說明. Skip redundant same-theme compare lines.
+        // Reuse: UI shows「既有主題」+ single short 說明. Never append self-fit restatements.
         const strip = value => String(value || "")
           .normalize("NFKC")
           .replace(/[「」『』《》【】（）()：:。.\s]/g, "")
           .toLocaleLowerCase("zh-Hant-TW");
         const themeKey = strip(themeName);
         const reasonKey = strip(matchReason);
-        const quotedThemes = [...String(matchReason || "").matchAll(/既有主題「([^」]+)」/g)]
+        const quotedThemes = [...String(matchReason || "").matchAll(/(?:既有主題)?「([^」]+)」/g)]
           .map(item => strip(item[1]));
         const mentionsMatchedOnly = Boolean(themeKey)
           && quotedThemes.length > 0
           && quotedThemes.every(key => key === themeKey);
-        const selfCompare = mentionsMatchedOnly
-          && /範圍相符|範圍相同|範圍一致|建議沿用|可以沿用|沿用既有主題/.test(matchReason);
+        const fitRestatement = /符合[^；]{0,40}範疇|與該主題[^；]{0,40}相符|範圍相符|範圍相同|範圍一致|建議沿用|可以沿用|沿用既有主題|檢索範圍相符/.test(matchReason)
+          || (mentionsMatchedOnly && /相符|相同|一致|沿用/.test(matchReason));
         const redundant = !reasonKey
-          || selfCompare
+          || fitRestatement
           || (themeKey && (reasonKey === themeKey
             || reasonKey === `既有主題${themeKey}`
             || reasonKey === `建議沿用既有主題${themeKey}`
             || reasonKey === `沿用既有主題${themeKey}`));
-        const reasonParts = [group.reason];
-        if (!redundant) reasonParts.push(matchReason);
+        // Stage-1 說明 + optional stage-2 建議 (genuine reuse rationale only).
+        const primary = String(group.reason || "").trim();
+        let stage2 = "";
+        if (!redundant && matchReason && matchReason !== primary
+          && !/已有經使用者確認的主題對照/.test(matchReason)) {
+          stage2 = matchReason;
+          // Prefer「與既有主題「X」」wording when a bare「與「X」」appears.
+          if (!/與既有主題[「『]/.test(stage2) && /與[「『]/.test(stage2)) {
+            stage2 = stage2.replace(/與([「『])/g, "與既有主題$1");
+          }
+          stage2 = `建議：${stage2}`;
+        }
+        const reason = (
+          primary
+            ? (stage2 ? `${primary}；${stage2}` : primary)
+            : (stage2 ? stage2.replace(/^建議：/, "") : "")
+        ).slice(0, 500);
         return {
           ...group,
           standard_topic: match.matched_topic,
-          reason: reasonParts.filter(Boolean).join("；").slice(0, 500),
+          reason,
           confidence,
           existing: true
         };
@@ -376,7 +394,7 @@ async function requestTopicStandardMatches({ groups, standards, config, controll
         .replace(/[「」『』《》【】（）()：:。.\s]/g, "")
         .toLocaleLowerCase("zh-Hant-TW");
       const proposedKey = stripKeep(proposedName);
-      const keepQuoted = [...String(matchReason || "").matchAll(/既有主題「([^」]+)」/g)]
+      const keepQuoted = [...String(matchReason || "").matchAll(/(?:既有主題)?「([^」]+)」/g)]
         .map(item => stripKeep(item[1]));
       const sameAsProposed = Boolean(proposedKey)
         && keepQuoted.length > 0
@@ -390,8 +408,12 @@ async function requestTopicStandardMatches({ groups, standards, config, controll
           existing: true
         };
       }
-      const compareDetail = matchReason || "未找到合適的既有主題，保留第一階段建議名稱。";
-      const compareSegment = `既有主題比對：${compareDetail}`;
+      // Stage-2 suggestion line (UI label「建議：」). Keep「與既有主題「X」」wording.
+      let compareDetail = matchReason || "未找到合適的既有主題，保留第一階段建議名稱。";
+      if (!/與既有主題[「『]/.test(compareDetail) && /與[「『]/.test(compareDetail)) {
+        compareDetail = compareDetail.replace(/與([「『])/g, "與既有主題$1");
+      }
+      const compareSegment = `建議：${compareDetail}`;
       return {
         ...group,
         standard_topic: group.standard_topic,
@@ -467,16 +489,28 @@ async function prepareTopicOrganizer() {
     const standards = topicOrganizerStandards(options, pages);
     const preferExistingTopics = topicOrganizerPreference(config);
     const organizerPromptOptions = { preferExistingTopics };
-    const confirmedGroups = candidates.filter(item => item.preferredStandard).map(candidate => ({
-        standard_topic: candidate.preferredStandard,
+    // Confirmed mappings: 說明 must describe theme content/scope (definition), never process meta.
+    const dictionaryDefs = new Map(
+      normalizeTopicDictionary(config.topicDictionary).map(item => [
+        N.topicKey(item.name),
+        S.cleanText(item.definition)
+      ])
+    );
+    const confirmedGroups = candidates.filter(item => item.preferredStandard).map(candidate => {
+      const preferred = candidate.preferredStandard;
+      const definition = dictionaryDefs.get(N.topicKey(preferred)) || "";
+      return {
+        standard_topic: preferred,
         source_topics: [candidate.name],
-        definition: "",
+        definition,
         keep_separate: [],
-        reason: `已有經使用者確認的主題對照「${candidate.preferredStandard}」。`,
+        // Prefer definition as 說明; leave empty rather than emitting confirmed-mapping boilerplate.
+        reason: definition,
         confidence: "high",
         existing: true,
         confirmed: true
-      }));
+      };
+    });
     const permanentlyDiscarded = candidates.filter(item => item.permanentlyDiscarded && !item.preferredStandard);
     const aiCandidates = candidates.filter(item => !item.preferredStandard && !item.permanentlyDiscarded);
     let aiGroups = [];
