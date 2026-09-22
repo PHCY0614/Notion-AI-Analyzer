@@ -798,6 +798,13 @@ function normalizeThemeNameQuotes(text) {
   return String(text || "").replace(/『([^』]*)』/g, "「$1」");
 }
 
+function themeNameKey(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .replace(/[「」『』《》【】（）()：:。.\s]/g, "")
+    .toLocaleLowerCase("zh-Hant-TW");
+}
+
 function organizerReasonSegments(raw) {
   return normalizeThemeNameQuotes(String(raw || "").trim())
     .split("；")
@@ -805,12 +812,20 @@ function organizerReasonSegments(raw) {
     .filter(Boolean);
 }
 
+function extractComparedThemeNames(detail, labeledTheme = "") {
+  const names = [];
+  const labeled = String(labeledTheme || "").trim();
+  if (labeled) names.push(labeled);
+  const text = normalizeThemeNameQuotes(detail);
+  for (const match of text.matchAll(/既有主題「([^」]+)」/g)) {
+    names.push(String(match[1] || "").trim());
+  }
+  return [...new Set(names.filter(Boolean))];
+}
+
 function isRedundantExistingCompare(themeName, detail) {
-  const strip = value => String(value || "")
-    .replace(/[「」『』《》【】（）()：:。.\s]/g, "")
-    .toLocaleLowerCase("zh-Hant-TW");
-  const theme = strip(themeName);
-  const body = strip(detail);
+  const theme = themeNameKey(themeName);
+  const body = themeNameKey(detail);
   if (!body) return true;
   if (theme && (body === theme || body === `既有主題${theme}` || body === `建議沿用既有主題${theme}` || body === `沿用既有主題${theme}`)) {
     return true;
@@ -819,31 +834,60 @@ function isRedundantExistingCompare(themeName, detail) {
   return false;
 }
 
+/** True when the comparison target theme equals the proposed/canonical name. */
+function isSameThemeComparison(proposedName, labeledTheme, detail) {
+  const proposedKey = themeNameKey(proposedName);
+  if (!proposedKey) return false;
+  if (labeledTheme && themeNameKey(labeledTheme) === proposedKey) return true;
+  return extractComparedThemeNames(detail, labeledTheme)
+    .some(name => themeNameKey(name) === proposedKey);
+}
+
+function isSelfCompareExplanation(proposedName, segment) {
+  const text = normalizeThemeNameQuotes(segment);
+  if (isRedundantExistingCompare(proposedName, text)) return true;
+  if (!themeNameKey(proposedName)) return false;
+  if (!isSameThemeComparison(proposedName, "", text)) return false;
+  return /範圍相符|範圍相同|範圍一致|建議沿用|可以沿用|沿用既有主題/.test(text)
+    || /^與既有主題「[^」]+」/.test(text);
+}
+
 /**
  * Formats organizer group reason for display. Prefer structured existing/
  * comparison layout over a single「建議說明」prefix. Normalizes 『』 to 「」.
+ * Never leaves 說明 + 既有主題比對 on one line joined by「；」.
  */
 function formatOrganizerReasonText(raw, group = {}) {
+  const proposedName = String(group.standardTopic || group.standard_topic || "").trim();
   const segments = organizerReasonSegments(raw);
   const explanations = [];
   const comparisons = [];
-  let sawRedundantCompare = false;
+  let sawSameThemeCompare = false;
   for (const segment of segments) {
     const match = segment.match(/^既有主題比對(?:（([^）]*)）)?：(.+)$/s);
     if (!match) {
-      explanations.push(segment);
+      if (isSelfCompareExplanation(proposedName, segment)) {
+        sawSameThemeCompare = true;
+        continue;
+      }
+      explanations.push(segment.replace(/^說明：/, "").trim());
       continue;
     }
     const labeledTheme = String(match[1] || "").trim();
     const detail = String(match[2] || "").trim();
-    if (group.existing === true || isRedundantExistingCompare(labeledTheme, detail)) {
-      sawRedundantCompare = true;
+    if (
+      group.existing === true
+      || isRedundantExistingCompare(labeledTheme || proposedName, detail)
+      || isSameThemeComparison(proposedName, labeledTheme, detail)
+    ) {
+      sawSameThemeCompare = true;
       continue;
     }
     comparisons.push(`既有主題比對：${detail}`);
   }
-  const explanation = explanations.join("；") || "未提供說明";
-  const treatAsExisting = group.existing === true || (sawRedundantCompare && !comparisons.length);
+  const explanation = explanations.filter(Boolean).join("；") || "未提供說明";
+  const treatAsExisting = group.existing === true
+    || (sawSameThemeCompare && !comparisons.length);
   if (treatAsExisting) {
     return `既有主題\n說明：${explanation}`;
   }
@@ -851,6 +895,24 @@ function formatOrganizerReasonText(raw, group = {}) {
     return `說明：${explanation}\n${comparisons.join("\n")}`;
   }
   return `說明：${explanation}`;
+}
+
+/** Renders formatted reason with bold「既有主題」label; keeps pre-line newlines. */
+function fillOrganizerReasonElement(el, raw, group = {}) {
+  const text = formatOrganizerReasonText(raw, group);
+  el.replaceChildren();
+  const lines = text.split("\n");
+  lines.forEach((line, index) => {
+    if (index > 0) el.appendChild(document.createTextNode("\n"));
+    if (line === "既有主題") {
+      const strong = document.createElement("strong");
+      strong.className = "topic-group-reason__label";
+      strong.textContent = line;
+      el.appendChild(strong);
+      return;
+    }
+    el.appendChild(document.createTextNode(line));
+  });
 }
 
 function updateApplyProgressUi() {
@@ -916,7 +978,7 @@ function renderOrganizerGroupCard(group) {
   head.append(selected, name, confidence);
   const reason = document.createElement("p");
   reason.className = "hint topic-group-reason";
-  reason.textContent = formatOrganizerReasonText(group.reason || group.definition || "", group);
+  fillOrganizerReasonElement(reason, group.reason || group.definition || "", group);
   const source = document.createElement("p");
   source.className = "topic-source";
   source.textContent = (group.aliases ?? []).length > 1

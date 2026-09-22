@@ -18,7 +18,7 @@ function testNotionStatusDialogHierarchy() {
   assert.match(html, /id="notion-status-dialog-scope" class="confirm-dialog__scope"/);
   assert.match(html, /只會新增或補齊「整理狀態」這個欄位及分析流程需要的狀態選項；既有欄位、既有選項與文章內容都會保留。/);
   assert.match(source("options.js"), /找不到「整理狀態」欄位。要讓擴充功能自動建立這個欄位嗎？/);
-  assert.match(css, /\.confirm-dialog__message \{[^}]*font-size:\s*17px;/s);
+  assert.match(css, /\.confirm-dialog__message \{[^}]*font-size:\s*15px;/s);
   assert.match(css, /\.confirm-dialog__scope \{[^}]*font-size:\s*13px;/s);
 }
 
@@ -52,40 +52,99 @@ function testApplyProgressUi() {
 
 function testThemeSuggestionFormatting() {
   const optionsJs = source("options.js");
+  const optionsCss = source("options.css");
   const organizer = source("background/topic-organizer.js");
   assert.match(optionsJs, /function formatOrganizerReasonText\(/);
   assert.match(optionsJs, /function normalizeThemeNameQuotes\(/);
+  assert.match(optionsJs, /function fillOrganizerReasonElement\(/);
   assert.match(optionsJs, /topic-group-reason/);
+  assert.match(optionsJs, /topic-group-reason__label/);
   assert.match(optionsJs, /既有主題\\n說明：/);
+  assert.match(optionsJs, /createElement\("strong"\)/);
   assert.match(optionsJs, /refreshOrganizerAfterTargetChange/);
   assert.match(optionsJs, /config\.databaseChanged/);
   assert.match(optionsJs, /GET_TOPIC_ORGANIZER/);
+  assert.match(optionsCss, /\.topic-group-reason \{[^}]*white-space:\s*pre-line;/s);
+  assert.match(optionsCss, /\.topic-group-reason__label \{[^}]*font-weight:\s*700;/s);
   assert.match(organizer, /既有主題比對：\$\{compareDetail\}/);
   assert.match(organizer, /compareSegment/);
   assert.match(organizer, /existing: true/);
   assert.doesNotMatch(organizer, /既有主題比對（\$\{themeName\}）/);
   assert.match(source("prompt.js"), /keep_proposed reasons must name the closest unsuitable existing topic/);
   assert.match(source("prompt.js"), /Use 「」 around topic names, never 『』/);
+  assert.match(source("prompt.js"), /Do not write a self-comparison/);
 
   // Behavioral checks for display formatting.
   const start = optionsJs.indexOf("function normalizeThemeNameQuotes");
   const end = optionsJs.indexOf("function updateApplyProgressUi");
   assert.ok(start >= 0 && end > start, "formatter helpers present");
-  const sandbox = { console };
+  const sandbox = {
+    console,
+    document: {
+      createElement(tag) {
+        return {
+          tagName: String(tag).toUpperCase(),
+          className: "",
+          textContent: "",
+          childNodes: [],
+          appendChild(node) { this.childNodes.push(node); return node; },
+          replaceChildren(...nodes) { this.childNodes = nodes; }
+        };
+      },
+      createTextNode(text) { return { nodeType: 3, textContent: String(text) }; }
+    }
+  };
   vm.createContext(sandbox);
   vm.runInContext(optionsJs.slice(start, end), sandbox);
+
+  // 1) Layout A — different existing theme → two lines, no「；」between
+  const layoutA = sandbox.formatOrganizerReasonText(
+    "皆與實際的旅遊經驗分享與行程攻略相關。；既有主題比對：與既有主題「生活日常」範圍不同，既有主題無法突顯旅遊攻略與行程經驗分享的專門檢索範疇。",
+    { existing: false, standardTopic: "旅遊攻略" }
+  );
+  assert.equal(
+    layoutA,
+    "說明：皆與實際的旅遊經驗分享與行程攻略相關。\n既有主題比對：與既有主題「生活日常」範圍不同，既有主題無法突顯旅遊攻略與行程經驗分享的專門檢索範疇。"
+  );
+  assert.doesNotMatch(layoutA, /；/);
+
+  // 2) Layout B — same theme as compared existing →「既有主題」+「說明」only
+  const layoutB = sandbox.formatOrganizerReasonText(
+    "皆探討社會階層、貧富差距與貴族現象等社會結構議題。；既有主題比對：與既有主題「社會觀察」範圍相符，可沿用既有主題。",
+    { existing: false, standardTopic: "社會觀察" }
+  );
+  assert.equal(
+    layoutB,
+    "既有主題\n說明：皆探討社會階層、貧富差距與貴族現象等社會結構議題。"
+  );
+  assert.doesNotMatch(layoutB, /既有主題比對/);
+  assert.doesNotMatch(layoutB, /；/);
+
   assert.equal(
     sandbox.formatOrganizerReasonText("日常紀錄；既有主題比對（生活日常）：生活日常", { existing: true }),
     "既有主題\n說明：日常紀錄"
   );
   assert.equal(
-    sandbox.formatOrganizerReasonText("偏旅行規劃；既有主題比對：與既有主題『旅行』範圍不同", { existing: false }),
+    sandbox.formatOrganizerReasonText("偏旅行規劃；既有主題比對：與既有主題『旅行』範圍不同", { existing: false, standardTopic: "旅行規劃" }),
     "說明：偏旅行規劃\n既有主題比對：與既有主題「旅行」範圍不同"
   );
   assert.equal(
     sandbox.formatOrganizerReasonText("既有主題比對（生活日常）：生活日常", {}),
     "既有主題\n說明：未提供說明"
   );
+
+  // 3) Bold styling for「既有主題」label
+  const el = sandbox.document.createElement("p");
+  sandbox.fillOrganizerReasonElement(
+    el,
+    "皆探討社會階層。；既有主題比對：與既有主題「社會觀察」範圍相符",
+    { standardTopic: "社會觀察" }
+  );
+  assert.equal(el.childNodes[0].tagName, "STRONG");
+  assert.equal(el.childNodes[0].className, "topic-group-reason__label");
+  assert.equal(el.childNodes[0].textContent, "既有主題");
+  assert.equal(el.childNodes[1].textContent, "\n");
+  assert.match(el.childNodes[2].textContent, /^說明：/);
 }
 
 function testConfirmDialogBoldWeight() {

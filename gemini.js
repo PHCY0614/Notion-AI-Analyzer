@@ -659,7 +659,7 @@
         group_id: groupId,
         decision,
         matched_topic: matchedTopic,
-        reason: reason || `沿用既有主題「${matchedTopic}」。`,
+        reason: reason || "",
         confidence
       });
     }
